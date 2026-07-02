@@ -51,10 +51,14 @@ def plot_price_signals(price_data: pd.DataFrame, trades: pd.DataFrame) -> go.Fig
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=price_data.index, y=price_data["Close"], name="Close Price", line=dict(color="#1f77b4")))
     if not trades.empty:
+        entry_date_column = "Entry Date" if "Entry Date" in trades.columns else "entry_date"
+        entry_price_column = "Entry Price" if "Entry Price" in trades.columns else "entry_price"
+        exit_date_column = "Exit Date" if "Exit Date" in trades.columns else "exit_date"
+        exit_price_column = "Exit Price" if "Exit Price" in trades.columns else "exit_price"
         fig.add_trace(
             go.Scatter(
-                x=trades["entry_date"],
-                y=trades["entry_price"],
+                x=trades[entry_date_column],
+                y=trades[entry_price_column],
                 mode="markers",
                 name="Buy",
                 marker=dict(symbol="triangle-up", size=10, color="green"),
@@ -62,8 +66,8 @@ def plot_price_signals(price_data: pd.DataFrame, trades: pd.DataFrame) -> go.Fig
         )
         fig.add_trace(
             go.Scatter(
-                x=trades["exit_date"],
-                y=trades["exit_price"],
+                x=trades[exit_date_column],
+                y=trades[exit_price_column],
                 mode="markers",
                 name="Sell",
                 marker=dict(symbol="triangle-down", size=10, color="red"),
@@ -127,7 +131,7 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Configuration")
-        ticker = st.text_input("Ticker", value="AAPL", help=tooltip("Ticker"))
+        ticker = st.text_input("Ticker", value="AAPL", help="Enter a symbol like AAPL or MSFT. If you use live data, the app downloads daily price data for that ticker from Yahoo Finance when you click Run Backtest.")
         use_sample = st.checkbox("Use sample dataset (offline demo)", value=False, help="Use the included sample CSV instead of fetching live data from Yahoo.")
         date_range = st.date_input("Date Range", value=(start_default.date(), end_default.date()), help=tooltip("Date Range"))
         strategy_name = st.selectbox("Strategy", ["Moving Average Crossover", "Mean Reversion"], help="Choose the trading rule you want to test.")
@@ -144,6 +148,8 @@ def main() -> None:
         commission_rate = st.number_input("Commission Rate", min_value=0.0, max_value=0.01, value=0.001, step=0.0001, format="%.4f", help=tooltip("Commission Rate"))
         position_fraction = st.slider("Position Sizing", min_value=0.1, max_value=1.0, value=1.0, step=0.1, help=tooltip("Position Sizing"))
         run_clicked = st.button("Run Backtest", type="primary")
+
+        st.caption("Live mode only needs a ticker symbol, start date, and end date. The app fetches the daily OHLCV data automatically." )
 
     if not run_clicked:
         st.info("Set your inputs in the sidebar, then click Run Backtest to see results.")
@@ -189,8 +195,9 @@ def main() -> None:
 
     config = BacktestConfig(initial_capital=starting_capital, commission_rate=float(commission_rate), position_fraction=float(position_fraction))
     result = run_backtest(price_data, strategy, config)
-    benchmark_curve = build_benchmark_curve(result.price_data, starting_capital)
-    summary = performance_summary(result.equity_curve["Equity"], benchmark_curve, result.trades)
+    results_df = result.results
+    benchmark_curve = results_df["Buy and Hold Benchmark"]
+    summary = performance_summary(results_df["Strategy Equity"], benchmark_curve, result.trade_log)
 
     st.subheader("Results")
     metric_cols = st.columns(5)
@@ -204,12 +211,12 @@ def main() -> None:
         for term in ["Total Return", "CAGR", "Sharpe Ratio", "Max Drawdown", "Win Rate", "Buy-and-Hold Benchmark"]:
             st.write(f"**{term}**: {tooltip(term)}")
 
-    st.plotly_chart(plot_equity_curve(result.equity_curve["Equity"], benchmark_curve), use_container_width=True)
-    st.plotly_chart(plot_price_signals(result.price_data, result.trades), use_container_width=True)
-    st.plotly_chart(plot_drawdown(result.equity_curve["Equity"]), use_container_width=True)
+    st.plotly_chart(plot_equity_curve(results_df["Strategy Equity"], benchmark_curve), use_container_width=True)
+    st.plotly_chart(plot_price_signals(price_data, result.trade_log), use_container_width=True)
+    st.plotly_chart(plot_drawdown(results_df["Strategy Equity"]), use_container_width=True)
 
     with st.expander("View all trades"):
-        st.dataframe(result.trades, use_container_width=True)
+        st.dataframe(result.trade_log, use_container_width=True)
 
 
 if __name__ == "__main__":
