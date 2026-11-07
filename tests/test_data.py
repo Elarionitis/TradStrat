@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from urllib.request import Request
 
 import numpy as np
 import pandas as pd
@@ -11,6 +13,8 @@ import pytest
 from tradstrat import data as data_module
 from tradstrat.data import (
     DataError,
+    _fetch_yahoo_chart,
+    _fetch_yfinance,
     adjust_for_dividends,
     fetch_ohlcv,
     load_csv,
@@ -225,3 +229,134 @@ def test_sample_dataset_looks_like_a_market() -> None:
     assert len(sample) > 2000
     assert abs(returns.autocorr(1)) < 0.1
     assert 0.10 < returns.std() * np.sqrt(252) < 0.40
+
+
+class FakeResponse:
+    """Stands in for the object urlopen returns."""
+
+    def __init__(self, payload: dict) -> None:
+        self.body = json.dumps(payload).encode()
+
+    def __enter__(self) -> FakeResponse:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.body
+
+
+def stub_chart_api(monkeypatch: pytest.MonkeyPatch, payload: dict) -> list[str]:
+    urls: list[str] = []
+
+    def fake_urlopen(request: Request, timeout: int) -> FakeResponse:
+        urls.append(request.full_url)
+        return FakeResponse(payload)
+
+    monkeypatch.setattr(data_module, "urlopen", fake_urlopen)
+    return urls
+
+
+CHART_PAYLOAD = {
+    "chart": {
+        "error": None,
+        "result": [
+            {
+                "timestamp": [1704202200, 1704288600],  # 2024-01-02 and 2024-01-03 at 13:30 UTC
+                "indicators": {
+                    "quote": [
+                        {
+                            "open": [10.0, 11.0],
+                            "high": [11.0, 12.0],
+                            "low": [9.0, 10.0],
+                            "close": [10.5, 11.5],
+                            "volume": [100, 200],
+                        }
+                    ],
+                    "adjclose": [{"adjclose": [10.0, 11.5]}],
+                },
+            }
+        ],
+    }
+}
+
+
+def test_chart_api_response_is_parsed_into_valid_bars(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_chart_api(monkeypatch, CHART_PAYLOAD)
+
+    bars_ = validate_ohlcv(_fetch_yahoo_chart("AAPL", "2024-01-02", "2024-01-04"), "AAPL")
+
+    assert list(bars_.index) == [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")]
+    assert bars_["Close"].tolist() == [10.5, 11.5]
+    assert bars_["Adj Close"].tolist() == [10.0, 11.5]
+
+
+def test_chart_api_escapes_the_symbol_in_its_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls = stub_chart_api(monkeypatch, CHART_PAYLOAD)
+
+    _fetch_yahoo_chart("^GSPC", "2024-01-02", "2024-01-04")
+
+    assert "/chart/%5EGSPC?" in urls[0]
+
+
+def test_chart_api_error_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_chart_api(monkeypatch, {"chart": {"error": {"description": "No data found"}, "result": None}})
+
+    with pytest.raises(DataError, match="No data found"):
+        _fetch_yahoo_chart("NOPE", "2024-01-02", "2024-01-04")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"chart": {"result": []}},
+        {"chart": {"result": [{"timestamp": [], "indicators": {}}]}},
+        {},
+    ],
+)
+def test_empty_chart_api_responses_yield_no_rows(monkeypatch: pytest.MonkeyPatch, payload: dict) -> None:
+    stub_chart_api(monkeypatch, payload)
+
+    assert _fetch_yahoo_chart("AAPL", "2024-01-02", "2024-01-04").empty
+
+
+def test_yfinance_is_asked_for_unadjusted_prices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Adjustment happens in one place, so yfinance must return both Close and Adj Close."""
+    captured: dict = {}
+
+    def fake_download(ticker: str, **kwargs: object) -> pd.DataFrame:
+        captured.update(kwargs, ticker=ticker)
+        return bars()
+
+    monkeypatch.setattr(data_module.yf, "download", fake_download)
+
+    _fetch_yfinance("AAPL", "2024-01-02", "2024-01-04")
+
+    assert captured["ticker"] == "AAPL"
+    assert captured["auto_adjust"] is False
+
+
+def test_unrecognized_multiindex_columns_are_rejected() -> None:
+    frame = bars()
+    frame.columns = pd.MultiIndex.from_product([["AAPL"], list("abcde")])
+
+    with pytest.raises(DataError, match="OHLCV"):
+        validate_ohlcv(frame, "AAPL")
+
+
+def test_rows_that_are_all_invalid_raise_a_clear_error() -> None:
+    frame = bars()
+    frame["Close"] = np.nan
+
+    with pytest.raises(DataError, match="no complete"):
+        validate_ohlcv(frame, "AAPL")
+
+
+def test_a_fetch_outside_the_returned_range_is_an_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stub_provider(monkeypatch, bars(start="2020-01-01"))
+
+    with pytest.raises(DataError, match="requested range"):
+        fetch_ohlcv("AAPL", "2024-01-02", "2024-01-04", cache_dir=tmp_path, use_cache=False)

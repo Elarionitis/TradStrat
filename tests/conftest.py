@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+import socket
+
 import numpy as np
 import pandas as pd
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail any test that tries to reach the network, so the suite cannot depend on Yahoo being up."""
+
+    def refuse(*_: object, **__: object) -> None:
+        raise AssertionError("Tests must not touch the network.")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
 
 
 def make_bars(close: list[float] | np.ndarray, open_: list[float] | np.ndarray | None = None) -> pd.DataFrame:

@@ -24,10 +24,10 @@ dev = [
 tradstrat = "tradstrat.cli:main"
 
 [tool.setuptools]
-packages = ["tradstrat"]
+packages = ["tradstrat", "tradstrat.sample_data"]
 
 [tool.setuptools.package-data]
-tradstrat = ["sample_data/*.csv"]
+"tradstrat.sample_data" = ["*.csv"]
 
 [tool.setuptools.dynamic]
 version = { attr = "tradstrat.__version__" }
@@ -40,6 +40,8 @@ filterwarnings = ["error"]
 
 [tool.coverage.run]
 source = ["tradstrat"]
+branch = true
+omit = ["tradstrat/__main__.py"]
 
 
 [tool.ruff]
@@ -52,6 +54,7 @@ select = ["E", "F", "I", "B", "UP", "SIM", "C4", "PD", "NPY", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "tradstrat/glossary.py" = ["E501"]
+"scripts/mutation_check.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

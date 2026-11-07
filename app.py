@@ -72,7 +72,7 @@ def param_widget(strategy_key: str, spec: Any) -> float:
 def read_sidebar() -> Inputs:
     with st.sidebar:
         st.header("Data")
-        source = st.radio("Source", ["Yahoo Finance", "Synthetic sample"], horizontal=True)
+        source = st.radio("Source", ["Yahoo Finance", "Synthetic sample"], key="source")
         ticker, start, end = "", pd.Timestamp.min, pd.Timestamp.max
         if source == "Yahoo Finance":
             ticker = st.text_input(

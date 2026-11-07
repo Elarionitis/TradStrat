@@ -13,8 +13,9 @@ APP = str(Path(__file__).resolve().parents[1] / "app.py")
 @pytest.fixture
 def app() -> AppTest:
     """The dashboard running on the bundled dataset, so no test touches the network."""
-    test = AppTest.from_file(APP, default_timeout=60).run()
-    test.sidebar.radio[0].set_value("Synthetic sample").run()
+    test = AppTest.from_file(APP, default_timeout=60)
+    test.session_state["source"] = "Synthetic sample"
+    test.run()
     assert not test.exception
     return test
 
