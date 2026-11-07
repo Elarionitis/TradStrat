@@ -8,7 +8,7 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 import pytest
-from conftest import random_walk
+from conftest import make_bars, random_walk
 
 from tradstrat.engine import BacktestConfig, run_backtest
 from tradstrat.strategies import create_strategy
@@ -85,8 +85,26 @@ def test_unknown_objective_is_rejected(walk: pd.DataFrame) -> None:
         grid_search(walk, "ma_crossover", GRID, objective="vibes")
 
 
-def test_search_reports_a_deflated_sharpe_probability(walk: pd.DataFrame) -> None:
-    assert 0.0 <= grid_search(walk, "ma_crossover", GRID).deflated_sharpe <= 1.0
+def test_search_reports_deflated_sharpe_probabilities(walk: pd.DataFrame) -> None:
+    result = grid_search(walk, "ma_crossover", GRID)
+
+    assert 0.0 <= result.deflated_sharpe <= 1.0
+    assert 0.0 <= result.deflated_active_sharpe <= 1.0
+
+
+def test_owning_a_rising_market_is_not_mistaken_for_timing_skill() -> None:
+    """Regression: a long-only strategy on a bull market reported 98% "significant" against zero.
+
+    Prices here are pure drift plus noise, so no timing rule can have an edge over holding the asset.
+    """
+    rng = np.random.default_rng(3)
+    close = 100 * np.exp(np.cumsum(rng.normal(0.0012, 0.01, 2500)))
+    data = make_bars(close)
+
+    search = grid_search(data, "ma_crossover", build_grid("ma_crossover", 5))
+
+    assert search.deflated_sharpe > 0.95
+    assert search.deflated_active_sharpe < 0.5
 
 
 def test_out_of_sample_curve_has_one_row_per_date() -> None:

@@ -152,7 +152,9 @@ def _run_optimize(args: argparse.Namespace) -> None:
     print(search.table.head(args.top).round(3).to_string(index=False))
     print(f"\nBest: {search.best_params}")
     print("This score is in-sample. Use walk-forward to measure performance on unseen data.")
-    print(f"Deflated Sharpe: {search.deflated_sharpe:.1%}. {probability_verdict(search.deflated_sharpe)}")
+    print(f"Deflated Sharpe against zero: {search.deflated_sharpe:.1%}")
+    print(f"Deflated Sharpe against buy and hold: {search.deflated_active_sharpe:.1%}")
+    print(probability_verdict(search.deflated_active_sharpe))
 
 
 def _run_walk_forward(args: argparse.Namespace) -> None:

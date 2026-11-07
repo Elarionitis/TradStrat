@@ -223,13 +223,18 @@ def render_optimize(prices: pd.DataFrame, inputs: Inputs) -> None:
         return
     search = stored[1]
     parameters = [spec.name for spec in STRATEGIES[inputs.strategy_key].params]
-    columns = st.columns(3)
+    columns = st.columns(4)
     columns[0].metric("Combinations Tested", len(search.table))
     columns[1].metric("Best Sharpe (In-Sample)", f"{search.table['sharpe_ratio'].max():.2f}")
     columns[2].metric(
-        "Deflated Sharpe", f"{search.deflated_sharpe:.1%}", help=GLOSSARY["Deflated Sharpe Ratio"]
+        "Deflated Sharpe vs Zero", f"{search.deflated_sharpe:.1%}", help=GLOSSARY["Deflated Sharpe Ratio"]
     )
-    st.info(probability_verdict(search.deflated_sharpe))
+    columns[3].metric(
+        "Deflated Sharpe vs Buy and Hold",
+        f"{search.deflated_active_sharpe:.1%}",
+        help="The same test on returns above buy and hold. This one speaks to timing skill.",
+    )
+    st.info(probability_verdict(search.deflated_active_sharpe))
     st.caption(f"Best parameters: {search.best_params}")
     st.plotly_chart(search_figure(search.table, parameters, search.objective))
     st.dataframe(search.table.round(3), hide_index=True)

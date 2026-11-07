@@ -73,11 +73,11 @@ def test_risk_controls_can_be_enabled(app: AppTest) -> None:
 def test_search_results_persist_across_reruns(app: AppTest) -> None:
     button(app, "Run search").click().run()
     assert not app.exception
-    assert any(metric.label == "Deflated Sharpe" for metric in app.metric)
+    assert any(metric.label == "Deflated Sharpe vs Buy and Hold" for metric in app.metric)
 
     app.sidebar.number_input[1].set_value(20.0).run()
 
-    assert any(metric.label == "Deflated Sharpe" for metric in app.metric)
+    assert any(metric.label == "Deflated Sharpe vs Buy and Hold" for metric in app.metric)
 
 
 def test_walk_forward_reports_out_of_sample_results(app: AppTest) -> None:

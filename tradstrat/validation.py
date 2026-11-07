@@ -15,7 +15,7 @@ from typing import Any, Final
 import pandas as pd
 
 from tradstrat.engine import BacktestConfig, BacktestResult, run_backtest
-from tradstrat.metrics import Metrics, calculate_metrics, daily_returns
+from tradstrat.metrics import Metrics, calculate_metrics, daily_returns, sharpe_ratio
 from tradstrat.stats import deflated_sharpe_ratio
 from tradstrat.strategies import STRATEGIES, BuyAndHoldStrategy, create_strategy
 
@@ -56,13 +56,22 @@ def _check_objective(objective: str) -> None:
         raise ValueError(f"Unknown objective {objective!r}. Choose from: {', '.join(OBJECTIVES)}.")
 
 
+def _benchmark_returns(data: pd.DataFrame, config: BacktestConfig) -> pd.Series:
+    """Daily returns of holding the asset over ``data``, paying the same costs as a strategy."""
+    result = run_backtest(data, BuyAndHoldStrategy(), config.for_benchmark(), include_benchmark=False)
+    return daily_returns(result.results["Strategy Equity"])
+
+
 def _score_grid(
     data: pd.DataFrame, key: str, grid: list[Params], config: BacktestConfig, objective: str
 ) -> pd.DataFrame:
     """Backtest each combination and return a table ranked best first, with undefined scores last."""
+    benchmark_returns = _benchmark_returns(data, config)
     rows = []
     for params in grid:
-        metrics = run_backtest(data, create_strategy(key, **params), config, include_benchmark=False).metrics
+        result = run_backtest(data, create_strategy(key, **params), config, include_benchmark=False)
+        metrics = result.metrics
+        active_returns = daily_returns(result.results["Strategy Equity"]) - benchmark_returns
         rows.append(
             {
                 **params,
@@ -73,6 +82,7 @@ def _score_grid(
                 "total_return": metrics.total_return,
                 "max_drawdown": metrics.max_drawdown,
                 "number_of_trades": metrics.number_of_trades,
+                "active_sharpe": sharpe_ratio(active_returns),
             }
         )
     table = pd.DataFrame(rows)
@@ -89,13 +99,20 @@ def _row_params(row: pd.Series, grid: list[Params]) -> Params:
 
 @dataclass(frozen=True)
 class SearchResult:
-    """Every configuration tried, the winner, and how far the winner can be trusted."""
+    """Every configuration tried, the winner, and how far the winner can be trusted.
+
+    ``deflated_sharpe`` asks whether the winner made money for reasons beyond selection luck.
+    ``deflated_active_sharpe`` asks the harder question of whether it beat simply holding the asset. A
+    long-only strategy on a rising market passes the first test by owning the market, so the second is
+    the one that speaks to timing skill.
+    """
 
     table: pd.DataFrame
     objective: str
     best_params: Params
     best: BacktestResult
     deflated_sharpe: float
+    deflated_active_sharpe: float
 
 
 def grid_search(
@@ -116,12 +133,14 @@ def grid_search(
     best_params = _row_params(table.iloc[0], grid)
     best = run_backtest(data, create_strategy(key, **best_params), config)
     returns = daily_returns(best.results["Strategy Equity"])
+    active_returns = returns - daily_returns(best.results["Buy and Hold Benchmark"])
     return SearchResult(
         table=table,
         objective=objective,
         best_params=best_params,
         best=best,
         deflated_sharpe=deflated_sharpe_ratio(returns, table["sharpe_ratio"].tolist()),
+        deflated_active_sharpe=deflated_sharpe_ratio(active_returns, table["active_sharpe"].tolist()),
     )
 
 
@@ -226,9 +245,8 @@ def walk_forward(
     trade_log = pd.concat(trades, ignore_index=True) if trades else segments[0].trade_log
 
     # One continuous holding over the same dates, so the benchmark is not charged a round trip per fold.
-    benchmark_config = replace(config, position_fraction=1.0, stop_loss=None, target_volatility=None)
     benchmark = run_backtest(
-        data, BuyAndHoldStrategy(), benchmark_config, start=train_bars, include_benchmark=False
+        data, BuyAndHoldStrategy(), config.for_benchmark(), start=train_bars, include_benchmark=False
     ).results["Strategy Equity"]
 
     return WalkForwardResult(

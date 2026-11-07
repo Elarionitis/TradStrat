@@ -42,7 +42,12 @@ def test_comparison_hides_trade_statistics_for_the_benchmark() -> None:
 
 @pytest.mark.parametrize(
     ("probability", "phrase"),
-    [(0.97, "Significant"), (0.7, "Not significant"), (0.2, "No evidence"), (float("nan"), "Not enough")],
+    [
+        (0.97, "Beat buy and hold"),
+        (0.7, "Not significant"),
+        (0.2, "No evidence"),
+        (float("nan"), "Not enough"),
+    ],
 )
 def test_verdicts_match_their_probability(probability: float, phrase: str) -> None:
     assert probability_verdict(probability).startswith(phrase)

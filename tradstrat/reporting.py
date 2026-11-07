@@ -67,11 +67,11 @@ def comparison_table(strategy: Metrics, benchmark: Metrics) -> pd.DataFrame:
 
 
 def probability_verdict(probability: float) -> str:
-    """Describe a deflated Sharpe probability in plain language."""
+    """Describe the deflated Sharpe ratio of active returns, measured against buy and hold."""
     if math.isnan(probability):
         return "Not enough information to judge."
     if probability >= 0.95:
-        return "Significant at the 95% level, even after correcting for the number of trials."
+        return "Beat buy and hold at the 95% level, even after correcting for the number of trials."
     if probability >= 0.5:
-        return "Not significant: this result is consistent with selecting the luckiest configuration."
-    return "No evidence of skill: the winner did no better than the best of this many random trials would."
+        return "Not significant: the edge over buy and hold is consistent with picking the luckiest trial."
+    return "No evidence of skill: the best trial did not beat buy and hold by more than luck alone would."

@@ -74,6 +74,10 @@ class BacktestConfig:
         if self.volatility_lookback < 2:
             raise ValueError("Volatility lookback must be at least 2.")
 
+    def for_benchmark(self) -> BacktestConfig:
+        """The same costs without the risk settings, for a fully invested buy-and-hold position."""
+        return replace(self, position_fraction=1.0, stop_loss=None, target_volatility=None)
+
 
 @dataclass
 class _Book:
@@ -278,9 +282,8 @@ def run_backtest(
     results["Strategy Drawdown"] = results["Strategy Equity"] / results["Strategy Equity"].cummax() - 1
 
     if include_benchmark:
-        benchmark_config = replace(config, position_fraction=1.0, stop_loss=None, target_volatility=None)
         benchmark_signal = _extract_signal(data, BuyAndHoldStrategy())
-        benchmark_equity = _simulate(data, benchmark_signal, benchmark_config, start)[0]
+        benchmark_equity = _simulate(data, benchmark_signal, config.for_benchmark(), start)[0]
         results["Buy and Hold Benchmark"] = benchmark_equity
         results["Benchmark Drawdown"] = benchmark_equity / np.maximum.accumulate(benchmark_equity) - 1
 
