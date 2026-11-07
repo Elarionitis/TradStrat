@@ -26,6 +26,9 @@ tradstrat = "tradstrat.cli:main"
 [tool.setuptools]
 packages = ["tradstrat"]
 
+[tool.setuptools.package-data]
+tradstrat = ["sample_data/*.csv"]
+
 [tool.setuptools.dynamic]
 version = { attr = "tradstrat.__version__" }
 dependencies = { file = ["requirements.txt"] }

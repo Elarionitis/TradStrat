@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from tradstrat.data import DataError, fetch_daily_ohlcv
+from tradstrat.data import DataError, fetch_ohlcv, load_sample
 from tradstrat.engine import BacktestConfig, run_backtest
 from tradstrat.glossary import GLOSSARY
 from tradstrat.metrics import performance_summary
@@ -16,7 +15,6 @@ from tradstrat.strategies import MeanReversionStrategy, MovingAverageCrossoverSt
 
 
 APP_TITLE = "TradStrat"
-CACHE_DIR = Path(".cache")
 
 
 def tooltip(term: str) -> str:
@@ -165,25 +163,13 @@ def main() -> None:
 
     price_data = None
     if use_sample:
-        sample_path = Path(__file__).resolve().parent / "sample_data" / "aapl_sample.csv"
-        if not sample_path.exists():
-            st.error(f"Sample data not found at {sample_path}.")
-            return
-        try:
-            price_data = pd.read_csv(sample_path, parse_dates=["Date"], index_col="Date")
-            price_data.index = pd.to_datetime(price_data.index).tz_localize(None)
-        except Exception as exc:
-            st.error(f"Failed to load sample data: {exc}")
-            return
+        price_data = load_sample()
         st.info("Using built-in sample dataset. Date range and ticker above are ignored for the demo.")
     else:
         try:
-            price_data = fetch_daily_ohlcv(ticker, start_date, end_date, cache_dir=CACHE_DIR)
+            price_data = fetch_ohlcv(ticker, start_date, end_date)
         except DataError as error:
             st.error(str(error))
-            return
-        except Exception:
-            st.error("Could not load data for that ticker and date range.")
             return
 
     if strategy_name == "Moving Average Crossover" and len(price_data) < strategy_params["long_window"]:
