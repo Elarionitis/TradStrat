@@ -39,7 +39,7 @@ class ParamSpec:
         """Return evenly spaced values across the allowed range, for a parameter search."""
         values = np.linspace(self.low, self.high, points)
         if self.is_integer:
-            return sorted({int(round(value)) for value in values})
+            return sorted({round(float(value)) for value in values})
         return sorted({round(float(value), 4) for value in values})
 
 

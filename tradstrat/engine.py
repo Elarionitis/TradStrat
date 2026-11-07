@@ -1,135 +1,282 @@
-"""Event-driven backtesting engine."""
+"""Event-driven backtesting engine.
+
+The engine walks through history one bar at a time, as a live trading system would:
+
+1. At the open of bar ``t`` it acts on the signal formed at the close of bar ``t - 1``.
+2. During the bar it checks any resting stop order against the bar's low.
+3. At the close it marks the position to market.
+
+Because a signal is always filled on the following bar, a strategy cannot trade on a price it used to
+make the decision. Fills pay slippage and commission, and only whole shares are traded.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Final
+from dataclasses import dataclass, field, replace
+from functools import cached_property
+from typing import Any
 
+import numpy as np
 import pandas as pd
 
-from tradstrat.strategies import Strategy
+from tradstrat.metrics import (
+    TRADING_DAYS_PER_YEAR,
+    Metrics,
+    RelativeMetrics,
+    calculate_metrics,
+    calculate_relative_metrics,
+)
+from tradstrat.strategies import BuyAndHoldStrategy, Strategy
 
-TRADING_DAYS_PER_YEAR: Final[int] = 252
+TRADE_COLUMNS = [
+    "Entry Date",
+    "Exit Date",
+    "Entry Price",
+    "Exit Price",
+    "Size",
+    "Commission",
+    "P&L",
+    "Return",
+    "Bars Held",
+    "Exit Reason",
+]
+REQUIRED_COLUMNS = ["Open", "Low", "Close"]
 
 
 @dataclass(frozen=True)
 class BacktestConfig:
-    """Configuration for a single backtest run."""
+    """Settings for a single backtest.
 
-    initial_capital: float
-    commission_rate: float
-    position_fraction: float
+    ``commission_rate`` is a fraction of traded value and ``slippage_bps`` is the adverse price move per
+    fill in basis points. ``stop_loss`` is a fraction below the entry fill. ``target_volatility`` is an
+    annual figure: when set, positions are scaled down so that recent volatility matches it.
+    """
+
+    initial_capital: float = 10_000.0
+    commission_rate: float = 0.001
+    slippage_bps: float = 5.0
+    position_fraction: float = 1.0
+    stop_loss: float | None = None
+    target_volatility: float | None = None
+    volatility_lookback: int = 20
+
+    def __post_init__(self) -> None:
+        if self.initial_capital <= 0:
+            raise ValueError("Initial capital must be positive.")
+        if not 0 < self.position_fraction <= 1:
+            raise ValueError("Position fraction must be between 0 and 1.")
+        if self.commission_rate < 0 or self.slippage_bps < 0:
+            raise ValueError("Commission and slippage cannot be negative.")
+        if self.stop_loss is not None and not 0 < self.stop_loss < 1:
+            raise ValueError("Stop loss must be between 0 and 1.")
+        if self.target_volatility is not None and self.target_volatility <= 0:
+            raise ValueError("Target volatility must be positive.")
+        if self.volatility_lookback < 2:
+            raise ValueError("Volatility lookback must be at least 2.")
 
 
 @dataclass
+class _Book:
+    """The cash and open position during a simulation, plus the trades closed so far."""
+
+    cash: float
+    commission_rate: float
+    slippage: float
+    shares: int = 0
+    entry_price: float = 0.0
+    entry_commission: float = 0.0
+    entry_bar: int = 0
+    entry_date: pd.Timestamp | None = None
+    trades: list[dict[str, Any]] = field(default_factory=list)
+
+    def buy(self, bar: int, date: pd.Timestamp, price: float, budget: float) -> None:
+        fill = price * (1 + self.slippage)
+        shares = int(budget / (fill * (1 + self.commission_rate)))
+        if shares <= 0:
+            return
+        commission = shares * fill * self.commission_rate
+        self.cash -= shares * fill + commission
+        self.shares = shares
+        self.entry_price = fill
+        self.entry_commission = commission
+        self.entry_bar = bar
+        self.entry_date = date
+
+    def sell(self, bar: int, date: pd.Timestamp, price: float, reason: str) -> None:
+        fill = price * (1 - self.slippage)
+        commission = self.shares * fill * self.commission_rate
+        self.cash += self.shares * fill - commission
+        total_commission = self.entry_commission + commission
+        profit = (fill - self.entry_price) * self.shares - total_commission
+        self.trades.append(
+            {
+                "Entry Date": self.entry_date,
+                "Exit Date": date,
+                "Entry Price": self.entry_price,
+                "Exit Price": fill,
+                "Size": self.shares,
+                "Commission": total_commission,
+                "P&L": profit,
+                "Return": profit / (self.shares * self.entry_price),
+                "Bars Held": bar - self.entry_bar,
+                "Exit Reason": reason,
+            }
+        )
+        self.shares = 0
+        self.entry_date = None
+
+
+@dataclass(frozen=True)
 class BacktestResult:
-    """Container for the time series and trade log produced by the engine."""
+    """The time series and trade log produced by a run, with metrics computed on demand."""
 
     results: pd.DataFrame
     trade_log: pd.DataFrame
+    config: BacktestConfig
 
+    @cached_property
+    def metrics(self) -> Metrics:
+        return calculate_metrics(self.results["Strategy Equity"], self.trade_log, self.results["Position"])
 
-def run_backtest(data: pd.DataFrame, strategy: Strategy, config: BacktestConfig) -> BacktestResult:
-    """Run a day-by-day simulation using next-day-open execution."""
-    if data.empty:
-        raise ValueError("Backtests require at least one row of price data.")
-    if not 0 < config.position_fraction <= 1:
-        raise ValueError("Position fraction must be between 0 and 1.")
-    if config.initial_capital <= 0:
-        raise ValueError("Initial capital must be positive.")
+    @cached_property
+    def benchmark_metrics(self) -> Metrics:
+        return calculate_metrics(self.results["Buy and Hold Benchmark"], pd.DataFrame())
 
-    signals = strategy.generate_signals(data).copy()
-    signals["signal"] = signals["signal"].fillna(0).astype(int)
-
-    equity_curve = []
-    benchmark_curve = []
-    position_history = []
-    signal_history = []
-    action_markers = []
-    trade_rows = []
-
-    cash = config.initial_capital
-    shares = 0
-    entry_price = None
-    entry_date = None
-
-    first_close = float(data["Close"].iloc[0])
-
-    for i, (date, row) in enumerate(data.iterrows()):
-        current_signal = int(signals["signal"].iloc[i])
-        signal_history.append(current_signal)
-
-        if i > 0:
-            execution_price = float(row["Open"])
-            if shares == 0 and signal_history[-2] == 1:
-                # The signal was formed on the prior day's close, but the order is filled here at
-                # today's open. That one-bar delay is what keeps the event loop free of look-ahead bias.
-                shares = int((cash * config.position_fraction) / (execution_price * (1 + config.commission_rate)))
-                if shares > 0:
-                    cost = shares * execution_price
-                    commission = cost * config.commission_rate
-                    cash -= cost + commission
-                    entry_price = execution_price
-                    entry_date = data.index[i]
-                    action_markers.append({"Date": data.index[i], "Price": execution_price, "Action": "Buy"})
-            elif shares > 0 and signal_history[-2] == 0:
-                proceeds = shares * execution_price
-                commission = proceeds * config.commission_rate
-                cash += proceeds - commission
-                pnl = cash - config.initial_capital if entry_price is not None else 0.0
-                trade_rows.append(
-                    {
-                        "Entry Date": entry_date,
-                        "Exit Date": data.index[i],
-                        "Entry Price": entry_price,
-                        "Exit Price": execution_price,
-                        "Size": shares,
-                        "P&L": (execution_price - entry_price) * shares - (shares * entry_price + proceeds) * config.commission_rate,
-                    }
-                )
-                action_markers.append({"Date": data.index[i], "Price": execution_price, "Action": "Sell"})
-                shares = 0
-                entry_price = None
-                entry_date = None
-
-        close_price = float(row["Close"])
-        equity = cash + shares * close_price
-        benchmark_equity = config.initial_capital * (close_price / first_close)
-        equity_curve.append(equity)
-        benchmark_curve.append(benchmark_equity)
-        position_history.append(shares)
-
-    if shares > 0:
-        final_date = data.index[-1]
-        final_price = float(data["Close"].iloc[-1])
-        proceeds = shares * final_price
-        commission = proceeds * config.commission_rate
-        cash += proceeds - commission
-        trade_rows.append(
-            {
-                "Entry Date": entry_date,
-                "Exit Date": final_date,
-                "Entry Price": entry_price,
-                "Exit Price": final_price,
-                "Size": shares,
-                "P&L": (final_price - entry_price) * shares - (shares * entry_price + proceeds) * config.commission_rate,
-            }
+    @cached_property
+    def relative_metrics(self) -> RelativeMetrics:
+        return calculate_relative_metrics(
+            self.results["Strategy Equity"], self.results["Buy and Hold Benchmark"]
         )
-        action_markers.append({"Date": final_date, "Price": final_price, "Action": "Sell"})
-        equity_curve[-1] = cash
-        position_history[-1] = 0
 
+
+def _extract_signal(data: pd.DataFrame, strategy: Strategy) -> np.ndarray:
+    """Run the strategy and check that its output is a usable long/flat series."""
+    signals = strategy.generate_signals(data)
+    if not signals.index.equals(data.index):
+        raise ValueError("A strategy must return signals indexed like its input data.")
+    signal = signals["signal"].fillna(0).to_numpy(dtype=int)
+    if not np.isin(signal, (0, 1)).all():
+        raise ValueError("Signals must be 0 (flat) or 1 (long).")
+    return signal
+
+
+def _realized_volatility(close: pd.Series, lookback: int) -> np.ndarray:
+    """Annualized volatility of close-to-close returns, using data up to and including each bar."""
+    volatility = close.pct_change().rolling(lookback).std(ddof=1) * np.sqrt(TRADING_DAYS_PER_YEAR)
+    return volatility.to_numpy()
+
+
+def _simulate(
+    data: pd.DataFrame, signal: np.ndarray, config: BacktestConfig, start: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict[str, Any]]]:
+    """Step through bars ``start`` onward. Returns equity, cash, shares held and closed trades."""
+    opens = data["Open"].to_numpy(dtype=float)
+    lows = data["Low"].to_numpy(dtype=float)
+    closes = data["Close"].to_numpy(dtype=float)
+    dates = data.index
+    bars = len(data) - start
+
+    volatility = None
+    if config.target_volatility is not None:
+        volatility = _realized_volatility(data["Close"], config.volatility_lookback)
+
+    book = _Book(
+        cash=config.initial_capital,
+        commission_rate=config.commission_rate,
+        slippage=config.slippage_bps / 10_000,
+    )
+    equity = np.empty(bars)
+    cash = np.empty(bars)
+    position = np.empty(bars, dtype=int)
+    stopped_out = False
+
+    for step, bar in enumerate(range(start, len(data))):
+        if bar > 0:
+            target = signal[bar - 1]
+            if target == 0:
+                stopped_out = False
+
+            if book.shares > 0 and target == 0:
+                book.sell(bar, dates[bar], opens[bar], "signal")
+            elif book.shares == 0 and target == 1 and not stopped_out:
+                fraction = config.position_fraction
+                if volatility is not None and config.target_volatility is not None:
+                    # Sizing reads the estimate from the prior bar. No estimate yet means no entry.
+                    estimate = volatility[bar - 1]
+                    fraction = min(fraction, config.target_volatility / estimate) if estimate > 0 else 0.0
+                if fraction > 0:
+                    book.buy(bar, dates[bar], opens[bar], book.cash * fraction)
+
+        if book.shares > 0 and config.stop_loss is not None:
+            stop_price = book.entry_price * (1 - config.stop_loss)
+            if lows[bar] <= stop_price:
+                # An open below the stop means the market gapped through it, so the fill is the open.
+                # Filling at the stop price there would be an optimistic fiction.
+                book.sell(bar, dates[bar], min(opens[bar], stop_price), "stop_loss")
+                # Stay out until the signal resets, or the next bar would simply buy straight back in.
+                stopped_out = True
+
+        equity[step] = book.cash + book.shares * closes[bar]
+        cash[step] = book.cash
+        position[step] = book.shares
+
+    if book.shares > 0:
+        book.sell(len(data) - 1, dates[-1], closes[-1], "end_of_data")
+        equity[-1] = cash[-1] = book.cash
+        position[-1] = 0
+
+    return equity, cash, position, book.trades
+
+
+def run_backtest(
+    data: pd.DataFrame,
+    strategy: Strategy,
+    config: BacktestConfig | None = None,
+    *,
+    start: int = 0,
+    include_benchmark: bool = True,
+) -> BacktestResult:
+    """Run a strategy over ``data``.
+
+    Bars before ``start`` warm up the indicators without being traded, which is how walk-forward
+    validation tests a fresh window without waiting for a 200-bar average to fill.
+
+    The benchmark is a buy-and-hold position run through this same simulator, so it pays the same
+    commission and slippage on its entry and exit. Comparing a strategy that pays costs against a
+    frictionless benchmark would be unfair to the strategy.
+    """
+    config = config or BacktestConfig()
+    if len(data) - start < 2:
+        raise ValueError("A backtest requires at least two bars of price data.")
+    if start < 0:
+        raise ValueError("Start must not be negative.")
+    missing = [column for column in REQUIRED_COLUMNS if column not in data.columns]
+    if missing:
+        raise ValueError(f"Price data is missing required columns: {', '.join(missing)}.")
+
+    signal = _extract_signal(data, strategy)
+    equity, cash, position, trades = _simulate(data, signal, config, start)
+
+    index = data.index[start:]
     results = pd.DataFrame(
         {
-            "Strategy Equity": equity_curve,
-            "Buy and Hold Benchmark": benchmark_curve,
-            "Signal": signal_history,
-            "Position": position_history,
-            "Close": data["Close"].astype(float).values,
+            "Strategy Equity": equity,
+            "Cash": cash,
+            "Signal": signal[start:],
+            "Position": position,
+            "Close": data["Close"].to_numpy(dtype=float)[start:],
         },
-        index=data.index,
+        index=index,
     )
     results["Strategy Drawdown"] = results["Strategy Equity"] / results["Strategy Equity"].cummax() - 1
-    results["Benchmark Drawdown"] = results["Buy and Hold Benchmark"] / results["Buy and Hold Benchmark"].cummax() - 1
 
-    return BacktestResult(results=results, trade_log=pd.DataFrame(trade_rows),)
+    if include_benchmark:
+        benchmark_config = replace(config, position_fraction=1.0, stop_loss=None, target_volatility=None)
+        benchmark_signal = _extract_signal(data, BuyAndHoldStrategy())
+        benchmark_equity = _simulate(data, benchmark_signal, benchmark_config, start)[0]
+        results["Buy and Hold Benchmark"] = benchmark_equity
+        results["Benchmark Drawdown"] = benchmark_equity / np.maximum.accumulate(benchmark_equity) - 1
+
+    return BacktestResult(
+        results=results, trade_log=pd.DataFrame(trades, columns=TRADE_COLUMNS), config=config
+    )
