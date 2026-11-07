@@ -186,26 +186,3 @@ def calculate_relative_metrics(
             else float("nan")
         ),
     )
-
-
-def performance_summary(
-    equity_curve: pd.Series, benchmark_curve: pd.Series, trade_log: pd.DataFrame
-) -> dict[str, float]:
-    """Return a flat dictionary for the Streamlit dashboard."""
-    metrics = calculate_metrics(equity_curve, trade_log)
-    benchmark_total_return = (
-        float(benchmark_curve.iloc[-1] / benchmark_curve.iloc[0] - 1) if not benchmark_curve.empty else 0.0
-    )
-    return {
-        "Total Return": metrics.total_return,
-        "CAGR": metrics.cagr,
-        "Sharpe Ratio": metrics.sharpe_ratio,
-        "Sortino Ratio": metrics.sortino_ratio,
-        "Max Drawdown": metrics.max_drawdown,
-        "Max Drawdown Duration": float(metrics.max_drawdown_duration),
-        "Win Rate": metrics.win_rate,
-        "Average Win": metrics.average_win,
-        "Average Loss": metrics.average_loss,
-        "Number of Trades": float(metrics.number_of_trades),
-        "Benchmark Total Return": benchmark_total_return,
-    }
