@@ -17,7 +17,7 @@ from tradstrat.charts import (
     price_figure,
     search_figure,
 )
-from tradstrat.data import DataError, fetch_ohlcv, load_sample, validate_ohlcv
+from tradstrat.data import DataError, fetch_ohlcv, load_sample
 from tradstrat.engine import BacktestConfig, BacktestResult, run_backtest
 from tradstrat.glossary import GLOSSARY
 from tradstrat.metrics import daily_returns, sharpe_ratio
@@ -319,7 +319,7 @@ def main() -> None:
         return
 
     try:
-        prices = validate_ohlcv(load_prices(inputs), inputs.ticker or "sample")
+        prices = load_prices(inputs)
     except DataError as error:
         st.error(str(error))
         return
