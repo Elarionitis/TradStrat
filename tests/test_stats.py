@@ -68,8 +68,10 @@ def test_expected_best_sharpe_matches_a_simulation() -> None:
 def test_deflation_controls_false_discoveries_when_selecting_from_pure_noise() -> None:
     """The reason this module exists: the best of many skill-less strategies looks significant.
 
-    Across many universes containing no edge at all, the naive test should nearly always call the winner
-    significant, while the deflated test should do so only at around its 5% nominal rate.
+    Across many universes containing no edge at all, the naive test nearly always calls the winner
+    significant. The deflated test stays at or below its 5% nominal rate. It is conservative here because
+    the winner must clear the expected maximum by 1.645 standard errors of a single Sharpe estimate, which
+    is much wider than the spread of the maximum itself.
     """
     rng = np.random.default_rng(0)
     naive_discoveries, deflated_discoveries, universes = 0, 0, 200
@@ -81,7 +83,7 @@ def test_deflation_controls_false_discoveries_when_selecting_from_pure_noise() -
         deflated_discoveries += deflated_sharpe_ratio(winner, sharpes.tolist()) > 0.95
 
     assert naive_discoveries / universes > 0.9
-    assert deflated_discoveries / universes < 0.12
+    assert deflated_discoveries / universes <= 0.05
 
 
 def test_a_genuine_edge_survives_deflation() -> None:

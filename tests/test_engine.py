@@ -217,9 +217,20 @@ def test_start_skips_trading_but_keeps_indicators_warm() -> None:
 
     result = run_backtest(data, strategy, FRICTIONLESS, start=100)
 
-    assert result.results.index[0] == data.index[100]
-    assert result.results["Signal"].iloc[0] == strategy.generate_signals(data)["signal"].iloc[100]
+    assert result.results["Signal"].iloc[1] == strategy.generate_signals(data)["signal"].iloc[100]
     assert result.trade_log.empty or result.trade_log["Entry Date"].min() >= data.index[100]
+
+
+def test_start_opens_with_a_baseline_row_so_the_first_traded_bar_counts() -> None:
+    """Regression: without a baseline, the return earned on the first traded bar was lost."""
+    data = make_bars(close=[10.0, 10, 10, 20, 20], open_=[10.0, 10, 10, 10, 20])
+
+    result = run_backtest(data, FixedSignal((1, 1, 1, 1, 1)), FRICTIONLESS, start=3)
+
+    assert result.results.index[0] == data.index[2]
+    assert result.results["Strategy Equity"].iloc[0] == FRICTIONLESS.initial_capital
+    assert result.results["Position"].iloc[0] == 0
+    assert result.metrics.total_return == pytest.approx(1.0)
 
 
 def test_a_position_can_open_on_the_first_bar_after_warmup() -> None:

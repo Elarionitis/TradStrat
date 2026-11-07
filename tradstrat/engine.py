@@ -169,12 +169,17 @@ def _realized_volatility(close: pd.Series, lookback: int) -> np.ndarray:
 def _simulate(
     data: pd.DataFrame, signal: np.ndarray, config: BacktestConfig, start: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict[str, Any]]]:
-    """Step through bars ``start`` onward. Returns equity, cash, shares held and closed trades."""
+    """Step through history from ``start``. Returns equity, cash, shares held and closed trades.
+
+    The first row is a baseline holding the initial capital, with no trading on it. For ``start`` above
+    zero that row is the bar before ``start``, so a return earned on the first traded bar is counted.
+    """
     opens = data["Open"].to_numpy(dtype=float)
     lows = data["Low"].to_numpy(dtype=float)
     closes = data["Close"].to_numpy(dtype=float)
     dates = data.index
-    bars = len(data) - start
+    baseline = max(start - 1, 0)
+    bars = len(data) - baseline
 
     volatility = None
     if config.target_volatility is not None:
@@ -190,8 +195,8 @@ def _simulate(
     position = np.empty(bars, dtype=int)
     stopped_out = False
 
-    for step, bar in enumerate(range(start, len(data))):
-        if bar > 0:
+    for step, bar in enumerate(range(baseline, len(data))):
+        if bar > baseline:
             target = signal[bar - 1]
             if target == 0:
                 stopped_out = False
@@ -239,17 +244,19 @@ def run_backtest(
     """Run a strategy over ``data``.
 
     Bars before ``start`` warm up the indicators without being traded, which is how walk-forward
-    validation tests a fresh window without waiting for a 200-bar average to fill.
+    validation tests a fresh window without waiting for a 200-bar average to fill. The results then begin
+    at the last warm-up bar, as a baseline row holding the initial capital.
 
     The benchmark is a buy-and-hold position run through this same simulator, so it pays the same
     commission and slippage on its entry and exit. Comparing a strategy that pays costs against a
     frictionless benchmark would be unfair to the strategy.
     """
     config = config or BacktestConfig()
-    if len(data) - start < 2:
-        raise ValueError("A backtest requires at least two bars of price data.")
     if start < 0:
         raise ValueError("Start must not be negative.")
+    baseline = max(start - 1, 0)
+    if len(data) - baseline < 2:
+        raise ValueError("A backtest requires at least two bars of price data.")
     missing = [column for column in REQUIRED_COLUMNS if column not in data.columns]
     if missing:
         raise ValueError(f"Price data is missing required columns: {', '.join(missing)}.")
@@ -257,14 +264,14 @@ def run_backtest(
     signal = _extract_signal(data, strategy)
     equity, cash, position, trades = _simulate(data, signal, config, start)
 
-    index = data.index[start:]
+    index = data.index[baseline:]
     results = pd.DataFrame(
         {
             "Strategy Equity": equity,
             "Cash": cash,
-            "Signal": signal[start:],
+            "Signal": signal[baseline:],
             "Position": position,
-            "Close": data["Close"].to_numpy(dtype=float)[start:],
+            "Close": data["Close"].to_numpy(dtype=float)[baseline:],
         },
         index=index,
     )
