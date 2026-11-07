@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tradstrat"
+description = "Event-driven backtester with walk-forward validation and overfitting diagnostics."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dynamic = ["version", "dependencies"]
+
+[project.optional-dependencies]
+dev = [
+    "hypothesis>=6.100",
+    "mypy>=1.10",
+    "pandas-stubs",
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+tradstrat = "tradstrat.cli:main"
+
+[tool.setuptools]
+packages = ["tradstrat"]
+
+[tool.setuptools.dynamic]
+version = { attr = "tradstrat.__version__" }
+dependencies = { file = ["requirements.txt"] }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+source = ["tradstrat"]
+
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "C4", "PD", "NPY", "RUF"]
+ignore = ["PD901"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["tradstrat"]
+check_untyped_defs = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["plotly.*", "yfinance.*"]
+ignore_missing_imports = true

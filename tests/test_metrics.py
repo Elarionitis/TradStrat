@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import math
-import sys
-from pathlib import Path
 import unittest
 
 import numpy as np
 import pandas as pd
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-from metrics import calculate_metrics
+from tradstrat.metrics import calculate_metrics
 
 
 class MetricsTests(unittest.TestCase):

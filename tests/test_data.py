@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 import unittest
 
 import pandas as pd
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-from data_loader import _validate_data_frame
+from tradstrat.data import _validate_data_frame
 
 
 class DataLoaderTests(unittest.TestCase):

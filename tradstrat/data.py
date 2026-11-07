@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Final
 from urllib.error import HTTPError, URLError
@@ -12,7 +13,7 @@ from urllib.request import Request, urlopen
 import pandas as pd
 import yfinance as yf
 
-CACHE_DIR: Final[Path] = Path(__file__).resolve().parent / ".cache" / "market_data"
+CACHE_DIR: Final[Path] = Path(os.environ.get("TRADSTRAT_CACHE_DIR", Path.home() / ".cache" / "tradstrat"))
 REQUIRED_COLUMNS: Final[list[str]] = ["Open", "High", "Low", "Close", "Volume"]
 
 

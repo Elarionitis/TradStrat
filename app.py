@@ -8,11 +8,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from data_loader import DataError, fetch_daily_ohlcv
-from engine import BacktestConfig, run_backtest
-from glossary import GLOSSARY
-from metrics import performance_summary
-from strategies import MeanReversionStrategy, MovingAverageCrossoverStrategy
+from tradstrat.data import DataError, fetch_daily_ohlcv
+from tradstrat.engine import BacktestConfig, run_backtest
+from tradstrat.glossary import GLOSSARY
+from tradstrat.metrics import performance_summary
+from tradstrat.strategies import MeanReversionStrategy, MovingAverageCrossoverStrategy
 
 
 APP_TITLE = "TradStrat"

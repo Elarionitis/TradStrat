@@ -7,7 +7,7 @@ from typing import Final
 
 import pandas as pd
 
-from strategies import Strategy
+from tradstrat.strategies import Strategy
 
 TRADING_DAYS_PER_YEAR: Final[int] = 252
 
