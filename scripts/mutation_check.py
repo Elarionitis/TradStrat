@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SEARCH_LINE = "scored = _score_grid(data.iloc[train_start:test_start], key, grid, config, objective)"
+SEARCH_LINE = "scored = _score_grid(data.iloc[train_start:test_start], key, grid, config, objective).table"
 
 # Each entry is (file, original code, broken code, description).
 MUTATIONS = [
@@ -51,7 +51,7 @@ MUTATIONS = [
     (
         "validation.py",
         SEARCH_LINE,
-        "scored = _score_grid(data, key, grid, config, objective)",
+        "scored = _score_grid(data, key, grid, config, objective).table",
         "Leak: tune on all of the data",
     ),
     (
@@ -68,8 +68,8 @@ MUTATIONS = [
     ),
     (
         "engine.py",
-        'min(opens[bar], stop_price), "stop_loss"',
-        'stop_price, "stop_loss"',
+        "min(opens[bar], stop_price), reason",
+        "stop_price, reason",
         "Execution: stop fills through a gap",
     ),
     (
@@ -80,8 +80,8 @@ MUTATIONS = [
     ),
     (
         "engine.py",
-        "config.for_benchmark(), start)[0]",
-        "config, start)[0]",
+        "config.for_benchmark(), start).equity",
+        "config, start).equity",
         "Benchmark inherits the strategy's risk settings",
     ),
     (
@@ -128,6 +128,42 @@ MUTATIONS = [
     ),
     ("stats.py", "(kurtosis - 1) / 4", "(kurtosis - 3) / 4", "Sharpe standard error uses excess kurtosis"),
     ("stats.py", "% observations\n", "\n", "Bootstrap blocks do not wrap around"),
+    (
+        "engine.py",
+        "returns[1:] = rates[:-1] * days / DAYS_PER_YEAR",
+        "returns[1:] = rates[1:] * days / DAYS_PER_YEAR",
+        "Look-ahead: interest accrues at a rate published later",
+    ),
+    (
+        "engine.py",
+        "anchor = book.peak_price if config.trailing_stop",
+        "anchor = max(book.peak_price, highs[bar]) if config.trailing_stop",
+        "Look-ahead: trailing stop uses the bar's own high",
+    ),
+    (
+        "engine.py",
+        "                book.cash += interest[step]\n",
+        "                pass\n",
+        "Accounting: interest is reported but never credited",
+    ),
+    (
+        "engine.py",
+        'self.results["Position"],\n            risk_free=self.risk_free_returns,',
+        'self.results["Position"],',
+        "Sharpe ratio credits the cash rate as skill",
+    ),
+    (
+        "stats.py",
+        "best = np.argmax(np.where(np.isnan(in_sample), -np.inf, in_sample), axis=1)",
+        "best = np.argmax(np.where(np.isnan(out_of_sample), -np.inf, out_of_sample), axis=1)",
+        "Overfitting test picks its winner out of sample",
+    ),
+    (
+        "stats.py",
+        "relative_rank = rank / (configurations + 1)",
+        "relative_rank = rank / configurations",
+        "Overfitting test misplaces the median rank",
+    ),
 ]
 
 

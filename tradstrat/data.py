@@ -7,7 +7,7 @@ import os
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Final
+from typing import IO, Final, Literal
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
@@ -19,6 +19,31 @@ SAMPLE_PATH: Final[Path] = Path(__file__).resolve().parent / "sample_data" / "sy
 PRICE_COLUMNS: Final[list[str]] = ["Open", "High", "Low", "Close"]
 REQUIRED_COLUMNS: Final[list[str]] = [*PRICE_COLUMNS, "Volume"]
 TICKER_PATTERN: Final[re.Pattern[str]] = re.compile(r"[A-Z0-9.\-^=]{1,15}")
+CASH_RATE_TICKER: Final[str] = "^IRX"
+CASH_RATE_COLUMN: Final[str] = "Cash Rate"
+
+# Exports from brokers, exchanges and charting tools name the same fields in different ways.
+COLUMN_ALIASES: Final[dict[str, str]] = {
+    "open": "Open",
+    "o": "Open",
+    "high": "High",
+    "h": "High",
+    "low": "Low",
+    "l": "Low",
+    "close": "Close",
+    "c": "Close",
+    "last": "Close",
+    "price": "Close",
+    "volume": "Volume",
+    "vol": "Volume",
+    "v": "Volume",
+    "adj close": "Adj Close",
+    "adj_close": "Adj Close",
+    "adjclose": "Adj Close",
+    "adjusted close": "Adj Close",
+    "adjusted_close": "Adj Close",
+}
+DATE_ALIASES: Final[tuple[str, ...]] = ("date", "datetime", "timestamp", "time", "day")
 
 
 class DataError(ValueError):
@@ -40,12 +65,28 @@ def _flatten_columns(data: pd.DataFrame) -> pd.DataFrame:
     raise DataError("Provider returned columns that do not include OHLCV data.")
 
 
+def _standardize_columns(data: pd.DataFrame) -> pd.DataFrame:
+    """Rename columns such as ``close`` or ``adj_close`` to the names used throughout TradStrat."""
+    renames: dict[object, str] = {}
+    for column in data.columns:
+        name = COLUMN_ALIASES.get(str(column).strip().lower())
+        if name is not None and name not in renames.values():
+            renames[column] = name
+    return data.rename(columns=renames)
+
+
 def validate_ohlcv(data: pd.DataFrame, label: str) -> pd.DataFrame:
-    """Return a clean frame: numeric OHLCV, unique ascending dates, coherent prices."""
-    data = _flatten_columns(data)
+    """Return a clean frame: numeric OHLCV, unique ascending dates, coherent prices.
+
+    Column names are matched case-insensitively. Volume is optional, because index and currency data
+    often have none, and it is filled with zero when absent.
+    """
+    data = _standardize_columns(_flatten_columns(data))
     if data.empty:
         raise DataError(f"No daily price data was found for {label}. Check the symbol and date range.")
 
+    if "Volume" not in data.columns:
+        data = data.assign(Volume=0.0)
     missing_columns = [column for column in REQUIRED_COLUMNS if column not in data.columns]
     if missing_columns:
         raise DataError(f"The data for {label} is missing required columns: {', '.join(missing_columns)}.")
@@ -83,14 +124,41 @@ def adjust_for_dividends(data: pd.DataFrame) -> pd.DataFrame:
     return data.drop(columns="Adj Close")
 
 
-def load_csv(path: str | Path, adjust: bool = True) -> pd.DataFrame:
-    """Load OHLCV rows from a CSV file with a ``Date`` column."""
-    path = Path(path)
+def _parse_dates(values: pd.Series) -> pd.DatetimeIndex:
+    """Parse a date column, including Unix timestamps in seconds or milliseconds."""
+    if pd.api.types.is_numeric_dtype(values):
+        unit: Literal["s", "ms"] = "ms" if values.abs().max() > 1e11 else "s"
+        return pd.DatetimeIndex(pd.to_datetime(values, unit=unit))
+    return pd.DatetimeIndex(pd.to_datetime(values, format="mixed"))
+
+
+def read_price_csv(source: str | Path | IO[str] | IO[bytes], label: str | None = None) -> pd.DataFrame:
+    """Read an OHLCV CSV with any common column naming, and return it validated but unadjusted.
+
+    ``source`` may be a path or an open file, such as a file uploaded to the dashboard. The date column
+    may be called Date, Datetime, Timestamp or Time, and may hold Unix timestamps.
+    """
+    name = label or (Path(source).name if isinstance(source, str | Path) else "the uploaded file")
     try:
-        raw = pd.read_csv(path, parse_dates=["Date"], index_col="Date")
+        raw = pd.read_csv(source)
     except (OSError, ValueError, pd.errors.ParserError) as exc:
-        raise DataError(f"Could not read {path}: {exc}") from exc
-    data = validate_ohlcv(raw, path.name)
+        raise DataError(f"Could not read {name}: {exc}") from exc
+
+    date_column = next(
+        (column for column in raw.columns if str(column).strip().lower() in DATE_ALIASES), None
+    )
+    if date_column is None:
+        raise DataError(f"{name} needs a date column named Date, Datetime, Timestamp or Time.")
+    try:
+        raw.index = _parse_dates(raw.pop(date_column))
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise DataError(f"Could not parse the dates in {name}: {exc}") from exc
+    return validate_ohlcv(raw, name)
+
+
+def load_csv(source: str | Path | IO[str] | IO[bytes], adjust: bool = True) -> pd.DataFrame:
+    """Load OHLCV rows from a CSV file, adjusting for dividends when it has an adjusted close."""
+    data = read_price_csv(source)
     return adjust_for_dividends(data) if adjust else data
 
 
@@ -170,6 +238,36 @@ def normalize_ticker(ticker: str) -> str:
     if not TICKER_PATTERN.fullmatch(symbol):
         raise DataError(f"{ticker!r} is not a valid ticker symbol.")
     return symbol
+
+
+def attach_cash_rate(data: pd.DataFrame, rate: float | pd.Series) -> pd.DataFrame:
+    """Add the annual yield that uninvested cash earns, as a ``Cash Rate`` column.
+
+    ``rate`` is either a fixed annual rate, such as 0.04, or a dated series of annual rates. A series is
+    carried forward onto the price dates, so each bar uses the latest rate published on or before it.
+    The engine accrues interest on cash and measures Sharpe ratios against this same rate.
+    """
+    if isinstance(rate, pd.Series):
+        rates = rate.astype(float).sort_index()
+        aligned = rates.reindex(rates.index.union(data.index)).ffill().reindex(data.index)
+        column = aligned.fillna(0.0)
+    else:
+        column = pd.Series(float(rate), index=data.index)
+    if (column < -0.05).any() or (column > 0.5).any():
+        raise DataError("Cash rates must be annual decimals, such as 0.04 for 4%.")
+    return data.assign(**{CASH_RATE_COLUMN: column.to_numpy()})
+
+
+def fetch_cash_rate(
+    start: str | pd.Timestamp, end: str | pd.Timestamp, *, cache_dir: Path | None = None
+) -> pd.Series:
+    """Fetch the 13-week US Treasury bill yield from Yahoo (``^IRX``) as annual decimals.
+
+    The request starts a month early, so that the first price bar already has a published rate.
+    """
+    early_start = pd.Timestamp(start) - pd.DateOffset(months=1)
+    bills = fetch_ohlcv(CASH_RATE_TICKER, early_start, end, adjust=False, cache_dir=cache_dir)
+    return (bills["Close"] / 100).rename(CASH_RATE_COLUMN)
 
 
 def _read_cache(path: Path, label: str) -> pd.DataFrame | None:

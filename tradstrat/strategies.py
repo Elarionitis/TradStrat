@@ -50,6 +50,8 @@ class Strategy(ABC):
     label: ClassVar[str]
     description: ClassVar[str]
     params: ClassVar[tuple[ParamSpec, ...]] = ()
+    # Indicator columns drawn on the price chart, as (column, display name) pairs.
+    overlays: ClassVar[tuple[tuple[str, str], ...]] = ()
 
     @abstractmethod
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -132,6 +134,10 @@ class MovingAverageCrossoverStrategy(Strategy):
     params: ClassVar[tuple[ParamSpec, ...]] = (
         ParamSpec("short_window", "Short Window", 50, 5, 100, 5, "Bars in the fast moving average."),
         ParamSpec("long_window", "Long Window", 200, 20, 300, 10, "Bars in the slow moving average."),
+    )
+    overlays: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("short_ma", "Fast average"),
+        ("long_ma", "Slow average"),
     )
 
     def __post_init__(self) -> None:
@@ -251,6 +257,7 @@ class DonchianBreakoutStrategy(Strategy):
         ParamSpec("entry_window", "Entry Window", 55, 10, 120, 5, "Buy a close above this many bars' high."),
         ParamSpec("exit_window", "Exit Window", 20, 5, 60, 5, "Exit a close below this many bars' low."),
     )
+    overlays: ClassVar[tuple[tuple[str, str], ...]] = (("upper", "Entry channel"), ("lower", "Exit channel"))
 
     def __post_init__(self) -> None:
         if self.entry_window <= 1 or self.exit_window <= 1:
@@ -300,3 +307,11 @@ class MomentumStrategy(Strategy):
             {"signal": (trailing_return > 0).astype(int), "trailing_return": trailing_return},
             index=data.index,
         )
+
+
+def indicator_overlays(strategy: Strategy, data: pd.DataFrame) -> pd.DataFrame | None:
+    """The strategy's price-scale indicators, labeled for display, or None if it has none."""
+    if not strategy.overlays:
+        return None
+    signals = strategy.generate_signals(data)
+    return pd.DataFrame({label: signals[column] for column, label in strategy.overlays}, index=data.index)

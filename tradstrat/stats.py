@@ -7,10 +7,13 @@ A single Sharpe ratio says nothing about how much of it is luck. The tools here 
   the skew and fat tails of the returns.
 * ``deflated_sharpe_ratio`` also corrects for how many configurations were tried. The best of many
   backtests looks good even when none of them has any edge, so it must clear a higher bar.
+* ``probability_of_backtest_overfitting`` asks how often the configuration that looks best on one half
+  of history lands in the bottom half of configurations on the other.
 
 References:
     Bailey and Lopez de Prado (2012), "The Sharpe Ratio Efficient Frontier".
     Bailey and Lopez de Prado (2014), "The Deflated Sharpe Ratio".
+    Bailey, Borwein, Lopez de Prado and Zhu (2017), "The Probability of Backtest Overfitting".
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import combinations
 from statistics import NormalDist
 from typing import Final
 
@@ -177,4 +181,86 @@ def bootstrap(
         probability_positive_sharpe=float(np.nanmean(sharpes > 0)),
         probability_beats_benchmark=beats_benchmark,
         sharpe_samples=sharpes,
+    )
+
+
+@dataclass(frozen=True)
+class OverfittingResult:
+    """Combinatorially symmetric cross-validation of a parameter search.
+
+    Each split chooses the configuration with the best in-sample Sharpe ratio and records where it ranks
+    out of sample. ``probability`` is the share of splits in which it ranked at or below the median, so
+    0.5 is what choosing at random would give and values near 0 mean the selection carried over.
+    """
+
+    probability: float
+    logits: np.ndarray
+    in_sample_sharpe: np.ndarray
+    out_of_sample_sharpe: np.ndarray
+    partitions: int
+
+    @property
+    def probability_of_loss(self) -> float:
+        """Share of splits in which the selected configuration lost money relative to cash."""
+        return float(np.mean(self.out_of_sample_sharpe < 0))
+
+
+def _sharpe_from_sums(total: np.ndarray, squares: np.ndarray, count: np.ndarray) -> np.ndarray:
+    """Annualized Sharpe ratios from per-configuration sums of returns and of squared returns."""
+    count = count[:, None]
+    mean = total / count
+    variance = (squares - count * mean**2) / (count - 1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sharpe = mean / np.sqrt(variance) * math.sqrt(TRADING_DAYS_PER_YEAR)
+    return np.where(variance > 1e-18, sharpe, np.nan)
+
+
+def probability_of_backtest_overfitting(returns: pd.DataFrame, partitions: int = 16) -> OverfittingResult:
+    """Estimate the probability of backtest overfitting by combinatorially symmetric cross-validation.
+
+    ``returns`` has one column of per-period (excess) returns for each configuration tried, on shared
+    dates. History is cut into ``partitions`` contiguous blocks, and every way of choosing half of them
+    as the in-sample set is evaluated, with the other half as the out-of-sample set. Because every block
+    is used both ways, the method needs no arbitrary train/test boundary.
+    """
+    if partitions < 2 or partitions % 2:
+        raise ValueError("Partitions must be an even number of at least 2.")
+    matrix = returns.to_numpy(dtype=float)
+    observations, configurations = matrix.shape
+    if configurations < 2:
+        raise ValueError("Overfitting needs at least two configurations to compare.")
+    if observations < 4 * partitions:
+        raise ValueError(f"Overfitting needs at least {4 * partitions} returns for {partitions} partitions.")
+    matrix = np.nan_to_num(matrix, nan=0.0)
+
+    blocks = np.array_split(np.arange(observations), partitions)
+    block_sums = np.stack([matrix[block].sum(axis=0) for block in blocks])
+    block_squares = np.stack([(matrix[block] ** 2).sum(axis=0) for block in blocks])
+    block_counts = np.array([len(block) for block in blocks], dtype=float)
+
+    chosen = np.zeros((math.comb(partitions, partitions // 2), partitions))
+    for row, combination in enumerate(combinations(range(partitions), partitions // 2)):
+        chosen[row, list(combination)] = 1.0
+    others = 1.0 - chosen
+
+    in_sample = _sharpe_from_sums(chosen @ block_sums, chosen @ block_squares, chosen @ block_counts)
+    out_of_sample = _sharpe_from_sums(others @ block_sums, others @ block_squares, others @ block_counts)
+
+    # An undefined Sharpe ratio (a configuration that never traded) ranks last on either side.
+    best = np.argmax(np.where(np.isnan(in_sample), -np.inf, in_sample), axis=1)
+    rows = np.arange(len(best))
+    scores = np.where(np.isnan(out_of_sample), -np.inf, out_of_sample)
+    selected = scores[rows, best][:, None]
+    below = (scores < selected).sum(axis=1)
+    tied = (scores == selected).sum(axis=1)
+    rank = below + (tied + 1) / 2  # Average rank from 1 (worst) to N (best), sharing ties.
+    relative_rank = rank / (configurations + 1)
+    logits = np.log(relative_rank / (1 - relative_rank))
+
+    return OverfittingResult(
+        probability=float(np.mean(logits <= 0)),
+        logits=logits,
+        in_sample_sharpe=in_sample[rows, best],
+        out_of_sample_sharpe=out_of_sample[rows, best],
+        partitions=partitions,
     )

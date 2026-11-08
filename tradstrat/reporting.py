@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import math
-from typing import Final
+from dataclasses import dataclass
+from typing import Final, Literal
 
 import pandas as pd
 
 from tradstrat.metrics import Metrics
+
+Tone = Literal["good", "warning", "bad", "neutral"]
 
 METRIC_LABELS: Final[dict[str, str]] = {
     "total_return": "Total Return",
@@ -75,3 +78,107 @@ def probability_verdict(probability: float) -> str:
     if probability >= 0.5:
         return "Not significant: the edge over buy and hold is consistent with picking the luckiest trial."
     return "No evidence of skill: the best trial did not beat buy and hold by more than luck alone would."
+
+
+def overfitting_verdict(probability: float) -> str:
+    """Describe the probability of backtest overfitting from a parameter search."""
+    if math.isnan(probability):
+        return "Not enough history to estimate."
+    if probability <= 0.1:
+        return "Low: the in-sample winner usually stayed in the top half on unseen data."
+    if probability < 0.5:
+        return "Moderate: the in-sample winner often slipped to the bottom half on unseen data."
+    return "High: picking the in-sample winner did no better than picking at random."
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One plain-English observation about a backtest, with a tone for display."""
+
+    tone: Tone
+    title: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """A headline judgment of a strategy against buy and hold, and the findings behind it."""
+
+    tone: Tone
+    headline: str
+    summary: str
+    findings: tuple[Finding, ...]
+
+
+def _compare(strategy: float, benchmark: float) -> Tone:
+    if math.isnan(strategy) or math.isnan(benchmark):
+        return "neutral"
+    return "good" if strategy > benchmark else "bad"
+
+
+def assess(strategy: Metrics, benchmark: Metrics, probability_beats_benchmark: float) -> Verdict:
+    """Judge a strategy against buy and hold in the terms a reader cares about.
+
+    ``probability_beats_benchmark`` is the bootstrap share of resampled histories in which the strategy's
+    Sharpe ratio was higher. The verdict only claims an edge when that share reaches 95%.
+    """
+    return_tone = _compare(strategy.cagr, benchmark.cagr)
+    sharpe_tone = _compare(strategy.sharpe_ratio, benchmark.sharpe_ratio)
+    drawdown_tone = _compare(strategy.max_drawdown, benchmark.max_drawdown)
+    probability = probability_beats_benchmark
+
+    findings = [
+        Finding(
+            return_tone,
+            "Return",
+            f"{format_metric('cagr', strategy.cagr)} a year, against "
+            f"{format_metric('cagr', benchmark.cagr)} for buy and hold.",
+        ),
+        Finding(
+            sharpe_tone,
+            "Risk-adjusted return",
+            f"Sharpe ratio {format_metric('sharpe_ratio', strategy.sharpe_ratio)}, against "
+            f"{format_metric('sharpe_ratio', benchmark.sharpe_ratio)} for buy and hold.",
+        ),
+        Finding(
+            drawdown_tone,
+            "Worst decline",
+            f"{format_metric('max_drawdown', strategy.max_drawdown)} from peak, against "
+            f"{format_metric('max_drawdown', benchmark.max_drawdown)} for buy and hold.",
+        ),
+    ]
+    if not math.isnan(probability):
+        findings.append(
+            Finding(
+                "good" if probability >= 0.95 else "bad" if probability < 0.5 else "warning",
+                "Confidence",
+                f"Its Sharpe ratio was higher in {probability:.0%} of resampled histories. "
+                "An edge needs 95% or more.",
+            )
+        )
+    if not math.isnan(strategy.exposure):
+        findings.append(
+            Finding(
+                "neutral",
+                "Time in the market",
+                f"Invested {strategy.exposure:.0%} of the time across {strategy.number_of_trades} trades.",
+            )
+        )
+
+    if strategy.number_of_trades == 0:
+        tone: Tone = "warning"
+        headline = "The strategy never traded"
+        summary = "No entry signal fired. Try a longer history or different parameters."
+    elif sharpe_tone == "good" and probability >= 0.95:
+        tone, headline = "good", "Beat buy and hold, and probably not by luck"
+        summary = "The edge held up in at least 95% of resampled histories. Confirm it with walk-forward."
+    elif sharpe_tone == "good":
+        tone, headline = "warning", "Beat buy and hold, but it could be luck"
+        summary = "The risk-adjusted return was higher, but not consistently enough to rule out chance."
+    elif drawdown_tone == "good":
+        tone, headline = "warning", "A smoother ride, but buy and hold did better"
+        summary = "It cut the worst decline, but earned less per unit of risk than simply holding."
+    else:
+        tone, headline = "bad", "Buy and hold did better"
+        summary = "Simply holding the asset earned more per unit of risk, with no deeper decline."
+    return Verdict(tone=tone, headline=headline, summary=summary, findings=tuple(findings))

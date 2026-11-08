@@ -3,6 +3,10 @@
 Ratios that are mathematically undefined (a flat equity curve has no Sharpe ratio, a strategy with no
 losing trades has no finite profit factor denominator) are reported as ``NaN`` rather than ``0.0``.
 A zero would rank a strategy that never traded above one that lost money during a parameter search.
+
+Risk-adjusted ratios accept ``risk_free`` in one of two forms: a float, read as an annual rate, or a
+series of per-period returns on cash aligned with the strategy's returns. The engine produces the series,
+so that a strategy sitting in Treasury bills earns their yield but does not get credit for it as skill.
 """
 
 from __future__ import annotations
@@ -56,9 +60,19 @@ def daily_returns(equity_curve: pd.Series) -> pd.Series:
     return equity_curve.astype(float).pct_change().dropna()
 
 
-def sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
-    """Annualized Sharpe ratio. ``risk_free_rate`` is an annual rate."""
-    excess = returns - risk_free_rate / TRADING_DAYS_PER_YEAR
+RiskFree = float | pd.Series
+
+
+def excess_returns(returns: pd.Series, risk_free: RiskFree = 0.0) -> pd.Series:
+    """Subtract the return on cash: an annual rate spread evenly, or a per-period series by date."""
+    if isinstance(risk_free, pd.Series):
+        return returns - risk_free.reindex(returns.index).fillna(0.0)
+    return returns - risk_free / TRADING_DAYS_PER_YEAR
+
+
+def sharpe_ratio(returns: pd.Series, risk_free: RiskFree = 0.0) -> float:
+    """Annualized Sharpe ratio of returns above the risk-free rate."""
+    excess = excess_returns(returns, risk_free)
     if len(excess) < 2:
         return float("nan")
     deviation = float(excess.std(ddof=1))
@@ -67,7 +81,7 @@ def sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
     return float(excess.mean() / deviation * np.sqrt(TRADING_DAYS_PER_YEAR))
 
 
-def sortino_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
+def sortino_ratio(returns: pd.Series, risk_free: RiskFree = 0.0) -> float:
     """Annualized Sortino ratio.
 
     Downside deviation is the root mean square of below-target returns taken over *all* observations,
@@ -75,7 +89,7 @@ def sortino_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
     mistake: it measures how much the losses differ from each other, so a strategy that loses the same
     amount every time would appear to have no downside risk.
     """
-    excess = returns - risk_free_rate / TRADING_DAYS_PER_YEAR
+    excess = excess_returns(returns, risk_free)
     if excess.empty:
         return float("nan")
     downside_deviation = float(np.sqrt((excess.clip(upper=0.0) ** 2).mean()))
@@ -117,7 +131,7 @@ def calculate_metrics(
     equity_curve: pd.Series,
     trade_log: pd.DataFrame,
     positions: pd.Series | None = None,
-    risk_free_rate: float = 0.0,
+    risk_free: RiskFree = 0.0,
 ) -> Metrics:
     """Calculate return, risk, and trade-quality statistics from a backtest."""
     if equity_curve.empty:
@@ -141,8 +155,8 @@ def calculate_metrics(
         total_return=float(equity_curve.iloc[-1] / equity_curve.iloc[0] - 1),
         cagr=annual_growth,
         annual_volatility=volatility,
-        sharpe_ratio=sharpe_ratio(returns, risk_free_rate),
-        sortino_ratio=sortino_ratio(returns, risk_free_rate),
+        sharpe_ratio=sharpe_ratio(returns, risk_free),
+        sortino_ratio=sortino_ratio(returns, risk_free),
         calmar_ratio=annual_growth / abs(max_drawdown) if max_drawdown < 0 else float("nan"),
         max_drawdown=max_drawdown,
         max_drawdown_duration=max_drawdown_duration(equity_curve),
@@ -157,18 +171,23 @@ def calculate_metrics(
 
 
 def calculate_relative_metrics(
-    strategy_equity: pd.Series, benchmark_equity: pd.Series, risk_free_rate: float = 0.0
+    strategy_equity: pd.Series, benchmark_equity: pd.Series, risk_free: RiskFree = 0.0
 ) -> RelativeMetrics:
-    """Regress strategy returns on benchmark returns (CAPM-style alpha and beta)."""
+    """Regress strategy excess returns on benchmark excess returns (CAPM-style alpha and beta)."""
     aligned = pd.concat(
-        [daily_returns(strategy_equity), daily_returns(benchmark_equity)], axis=1, join="inner"
+        [
+            excess_returns(daily_returns(strategy_equity), risk_free),
+            excess_returns(daily_returns(benchmark_equity), risk_free),
+        ],
+        axis=1,
+        join="inner",
     ).dropna()
     undefined = RelativeMetrics(*[float("nan")] * 4)
     if len(aligned) < 2:
         return undefined
 
-    strategy = aligned.iloc[:, 0].to_numpy() - risk_free_rate / TRADING_DAYS_PER_YEAR
-    benchmark = aligned.iloc[:, 1].to_numpy() - risk_free_rate / TRADING_DAYS_PER_YEAR
+    strategy = aligned.iloc[:, 0].to_numpy()
+    benchmark = aligned.iloc[:, 1].to_numpy()
     benchmark_variance = float(np.var(benchmark, ddof=1))
     if np.isclose(benchmark_variance, 0.0) or np.isclose(float(np.var(strategy, ddof=1)), 0.0):
         return undefined
@@ -186,3 +205,19 @@ def calculate_relative_metrics(
             else float("nan")
         ),
     )
+
+
+def rolling_sharpe(returns: pd.Series, window: int = TRADING_DAYS_PER_YEAR) -> pd.Series:
+    """Annualized Sharpe ratio over a trailing window. Undefined until the window fills or if flat."""
+    rolling = returns.rolling(window, min_periods=window)
+    deviation = rolling.std(ddof=1)
+    sharpe = rolling.mean() / deviation * np.sqrt(TRADING_DAYS_PER_YEAR)
+    return sharpe.where(deviation > 1e-12)
+
+
+def calendar_year_returns(equity_curve: pd.Series) -> pd.Series:
+    """Compounded return in each calendar year, with partial first and last years as they occurred."""
+    year_ends = equity_curve.groupby(pd.DatetimeIndex(equity_curve.index).year).last()
+    previous = year_ends.shift(1)
+    previous.iloc[0] = equity_curve.iloc[0]
+    return (year_ends / previous - 1).rename("Return")

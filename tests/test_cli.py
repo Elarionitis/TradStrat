@@ -90,3 +90,98 @@ def test_malformed_param_is_rejected_by_the_parser() -> None:
 def test_a_data_source_is_required() -> None:
     with pytest.raises(SystemExit):
         main(["backtest"])
+
+
+def test_backtest_ends_with_a_plain_english_verdict(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["backtest", "--sample", "--strategy", "momentum"]) == 0
+
+    output = capsys.readouterr().out
+    assert "buy and hold" in output.split("Probability of beating")[-1].lower()
+    assert "Worst decline" in output
+
+
+def test_report_writes_a_self_contained_html_file(tmp_path: Path) -> None:
+    path = tmp_path / "nested" / "report.html"
+
+    assert main(["report", "--sample", "--strategy", "donchian", "--out", str(path)]) == 0
+
+    text = path.read_text()
+    assert text.startswith("<!doctype html>")
+    assert "Donchian Breakout on the synthetic sample" in text
+    assert "Entry channel" in text  # The strategy's indicator lines are drawn on the price chart.
+    assert 'src="https://cdn.plot.ly' in text
+
+
+def test_offline_report_embeds_the_chart_library(tmp_path: Path) -> None:
+    path = tmp_path / "report.html"
+
+    assert main(["report", "--sample", "--out", str(path), "--offline"]) == 0
+
+    text = path.read_text()
+    assert 'src="https://cdn.plot.ly' not in text
+    assert len(text) > 1_000_000  # The library itself is inlined.
+
+
+def test_compare_lists_every_strategy_and_buy_and_hold(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["compare", "--sample"]) == 0
+
+    output = capsys.readouterr().out
+    for label in ("Moving Average Crossover", "RSI Reversal", "Buy and Hold"):
+        assert label in output
+    assert "nothing here was tuned" in output
+
+
+def test_optimize_reports_the_probability_of_overfitting(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["optimize", "--sample", "--strategy", "rsi", "--points", "3"]) == 0
+
+    assert "Probability of backtest overfitting" in capsys.readouterr().out
+
+
+def test_cash_rate_and_trailing_stop_options_are_accepted(capsys: pytest.CaptureFixture[str]) -> None:
+    arguments = ["backtest", "--sample", "--cash-rate", "0.04", "--stop-loss", "0.1", "--trailing"]
+
+    assert main(arguments) == 0
+
+
+def test_treasury_bill_cash_rate_is_fetched_for_the_data_range(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from tradstrat import cli
+
+    requested: list[pd.Timestamp] = []
+
+    def fake_rates(start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
+        requested.append(start)
+        return pd.Series([0.05], index=[start])
+
+    monkeypatch.setattr(cli, "fetch_cash_rate", fake_rates)
+
+    assert main(["backtest", "--sample", "--cash-rate", "tbill"]) == 0
+    assert requested
+
+
+def test_a_malformed_cash_rate_is_rejected() -> None:
+    with pytest.raises(SystemExit):
+        main(["backtest", "--sample", "--cash-rate", "lots"])
+
+
+def test_a_trailing_stop_without_a_distance_is_a_clean_error(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["backtest", "--sample", "--trailing"]) == 1
+
+    assert "trailing stop needs" in capsys.readouterr().err
+
+
+def test_report_escapes_untrusted_labels() -> None:
+    """A file name is shown in the report, so markup in it must be escaped rather than executed."""
+    from conftest import random_walk
+
+    from tradstrat.engine import run_backtest
+    from tradstrat.strategies import create_strategy
+    from tradstrat.tearsheet import ReportContext, build_report
+
+    result = run_backtest(random_walk(300), create_strategy("rsi"))
+
+    text = build_report(result, ReportContext(strategy="RSI", asset="<script>alert(1)</script>.csv"))
+
+    assert "<script>alert(1)</script>" not in text
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;.csv" in text

@@ -2,7 +2,9 @@
 
 Examples:
     tradstrat list
-    tradstrat backtest --sample --strategy rsi --param window=10
+    tradstrat backtest --ticker SPY --strategy rsi --param window=10 --cash-rate tbill
+    tradstrat report --ticker QQQ --strategy donchian --out reports/qqq.html
+    tradstrat compare --ticker GLD
     tradstrat optimize --ticker SPY --strategy ma_crossover --points 6
     tradstrat walk-forward --ticker SPY --strategy donchian --train-bars 756 --test-bars 252
 """
@@ -10,6 +12,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -17,13 +20,22 @@ from pathlib import Path
 import pandas as pd
 
 from tradstrat import __version__
-from tradstrat.data import fetch_ohlcv, load_csv, load_sample
-from tradstrat.engine import BacktestConfig, run_backtest
-from tradstrat.metrics import daily_returns
-from tradstrat.reporting import comparison_table, probability_verdict
+from tradstrat.data import attach_cash_rate, fetch_cash_rate, fetch_ohlcv, load_csv, load_sample
+from tradstrat.engine import BacktestConfig, BacktestResult, run_backtest
+from tradstrat.reporting import (
+    METRIC_LABELS,
+    assess,
+    comparison_table,
+    format_metric,
+    overfitting_verdict,
+    probability_verdict,
+)
 from tradstrat.stats import bootstrap, probabilistic_sharpe_ratio
-from tradstrat.strategies import STRATEGIES, create_strategy
-from tradstrat.validation import OBJECTIVES, build_grid, grid_search, walk_forward
+from tradstrat.strategies import STRATEGIES, create_strategy, indicator_overlays
+from tradstrat.tearsheet import ReportContext, build_report, write_report
+from tradstrat.validation import OBJECTIVES, build_grid, compare_strategies, grid_search, walk_forward
+
+TONE_MARKERS = {"good": "[+]", "warning": "[!]", "bad": "[-]", "neutral": "[ ]"}
 
 
 def _parse_param(text: str) -> tuple[str, float]:
@@ -36,12 +48,21 @@ def _parse_param(text: str) -> tuple[str, float]:
         raise argparse.ArgumentTypeError(f"{value!r} is not a number.") from exc
 
 
+def _parse_cash_rate(text: str) -> float | str:
+    if text.lower() == "tbill":
+        return "tbill"
+    try:
+        return float(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Use an annual decimal such as 0.04, or 'tbill'.") from exc
+
+
 def _shared_options() -> argparse.ArgumentParser:
     """Options common to every command that runs a backtest."""
     parser = argparse.ArgumentParser(add_help=False)
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--ticker", help="Yahoo Finance symbol, such as SPY.")
-    source.add_argument("--csv", type=Path, help="CSV file with Date and OHLCV columns.")
+    source.add_argument("--ticker", help="Yahoo Finance symbol, such as SPY, AAPL or BTC-USD.")
+    source.add_argument("--csv", type=Path, help="CSV file with a date column and OHLC columns.")
     source.add_argument("--sample", action="store_true", help="Use the bundled synthetic dataset.")
     parser.add_argument("--start", help="First date, YYYY-MM-DD. Default: ten years before --end.")
     parser.add_argument("--end", help="Last date, YYYY-MM-DD. Default: today.")
@@ -51,13 +72,20 @@ def _shared_options() -> argparse.ArgumentParser:
     parser.add_argument("--slippage-bps", type=float, default=5.0)
     parser.add_argument("--position-fraction", type=float, default=1.0)
     parser.add_argument("--stop-loss", type=float, help="Fraction below entry, such as 0.1.")
+    parser.add_argument("--trailing", action="store_true", help="Trail the stop below the highest high.")
     parser.add_argument("--target-vol", type=float, help="Annual volatility target, such as 0.15.")
+    parser.add_argument(
+        "--cash-rate",
+        type=_parse_cash_rate,
+        default=0.0,
+        help="Annual interest on idle cash, such as 0.04, or 'tbill' for the 13-week Treasury bill yield.",
+    )
     return parser
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="tradstrat", description="Backtest and validate trading strategies."
+        prog="tradstrat", description="Backtest trading strategies, then find out whether to believe them."
     )
     parser.add_argument("--version", action="version", version=f"tradstrat {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -70,6 +98,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--param", "-p", action="append", type=_parse_param, default=[], metavar="NAME=VALUE"
     )
     backtest.add_argument("--trades-out", type=Path, help="Write the trade log to this CSV file.")
+
+    report = commands.add_parser("report", parents=[shared], help="Write an HTML report of one backtest.")
+    report.add_argument("--param", "-p", action="append", type=_parse_param, default=[], metavar="NAME=VALUE")
+    report.add_argument("--out", type=Path, default=Path("reports/report.html"), help="Where to write it.")
+    report.add_argument("--offline", action="store_true", help="Embed the chart library in the file.")
+
+    commands.add_parser(
+        "compare", parents=[shared], help="Run every strategy at its defaults against buy and hold."
+    )
 
     optimize = commands.add_parser("optimize", parents=[shared], help="Search a parameter grid.")
     optimize.add_argument("--points", type=int, default=5, help="Grid points per parameter.")
@@ -87,12 +124,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _load_data(args: argparse.Namespace) -> pd.DataFrame:
     if args.sample:
-        return load_sample()
-    if args.csv:
-        return load_csv(args.csv)
-    end = pd.Timestamp(args.end) if args.end else pd.Timestamp.today().normalize()
-    start = pd.Timestamp(args.start) if args.start else end - pd.DateOffset(years=10)
-    return fetch_ohlcv(args.ticker, start, end)
+        data = load_sample()
+    elif args.csv:
+        data = load_csv(args.csv)
+    else:
+        end = pd.Timestamp(args.end) if args.end else pd.Timestamp.today().normalize()
+        start = pd.Timestamp(args.start) if args.start else end - pd.DateOffset(years=10)
+        data = fetch_ohlcv(args.ticker, start, end)
+
+    if args.cash_rate == "tbill":
+        return attach_cash_rate(data, fetch_cash_rate(data.index[0], data.index[-1]))
+    return data
+
+
+def _asset_label(args: argparse.Namespace) -> str:
+    if args.sample:
+        return "the synthetic sample"
+    return str(args.csv.name) if args.csv else args.ticker.upper()
 
 
 def _config(args: argparse.Namespace) -> BacktestConfig:
@@ -102,7 +150,9 @@ def _config(args: argparse.Namespace) -> BacktestConfig:
         slippage_bps=args.slippage_bps,
         position_fraction=args.position_fraction,
         stop_loss=args.stop_loss,
+        trailing_stop=args.trailing,
         target_volatility=args.target_vol,
+        cash_rate=args.cash_rate if isinstance(args.cash_rate, float) else 0.0,
     )
 
 
@@ -117,12 +167,19 @@ def _list_strategies() -> None:
             print(f"    {spec.name} (default {spec.default}, range {spec.low} to {spec.high}): {spec.help}")
 
 
+def _print_verdict(result: BacktestResult, probability: float) -> None:
+    verdict = assess(result.metrics, result.benchmark_metrics, probability)
+    print(f"\n{TONE_MARKERS[verdict.tone]} {verdict.headline}")
+    print(f"    {verdict.summary}")
+    for finding in verdict.findings:
+        print(f"    {TONE_MARKERS[finding.tone]} {finding.title}: {finding.detail}")
+
+
 def _run_backtest(args: argparse.Namespace) -> None:
     data = _load_data(args)
     strategy = create_strategy(args.strategy, **dict(args.param))
     result = run_backtest(data, strategy, _config(args))
-    returns = daily_returns(result.results["Strategy Equity"])
-    benchmark_returns = daily_returns(result.results["Buy and Hold Benchmark"])
+    returns = result.excess_returns
 
     print(f"{strategy}\n{_period(data)}\n")
     print(comparison_table(result.metrics, result.benchmark_metrics).to_string())
@@ -133,14 +190,48 @@ def _run_backtest(args: argparse.Namespace) -> None:
     )
     print(f"Probabilistic Sharpe (true Sharpe > 0): {probabilistic_sharpe_ratio(returns):.1%}")
 
+    probability = float("nan")
     if len(returns) >= 40:
-        estimate = bootstrap(returns, benchmark_returns)
+        estimate = bootstrap(returns, result.benchmark_excess_returns)
+        probability = estimate.probability_beats_benchmark
         print(f"Sharpe 95% interval: {estimate.sharpe.low:.2f} to {estimate.sharpe.high:.2f}")
-        print(f"Probability of beating buy and hold: {estimate.probability_beats_benchmark:.1%}")
+        print(f"Probability of beating buy and hold: {probability:.1%}")
+    _print_verdict(result, probability)
 
     if args.trades_out:
         result.trade_log.to_csv(args.trades_out, index=False)
         print(f"\nWrote {len(result.trade_log)} trades to {args.trades_out}")
+
+
+def _run_report(args: argparse.Namespace) -> None:
+    data = _load_data(args)
+    strategy = create_strategy(args.strategy, **dict(args.param))
+    result = run_backtest(data, strategy, _config(args))
+    context = ReportContext(
+        strategy=STRATEGIES[args.strategy].label,
+        asset=_asset_label(args),
+        parameters={spec.name: getattr(strategy, spec.name) for spec in STRATEGIES[args.strategy].params},
+        overlays=indicator_overlays(strategy, data),
+    )
+    path = write_report(args.out, build_report(result, context, offline=args.offline))
+    print(f"Wrote {path}")
+
+
+def _run_compare(args: argparse.Namespace) -> None:
+    data = _load_data(args)
+    comparison = compare_strategies(data, _config(args))
+    columns = ["cagr", "sharpe_ratio", "max_drawdown", "exposure", "number_of_trades"]
+    shown = pd.DataFrame(
+        {
+            METRIC_LABELS[name]: [
+                "-" if math.isnan(value) else format_metric(name, value) for value in comparison.table[name]
+            ]
+            for name in columns
+        },
+        index=comparison.table["Strategy"],
+    )
+    print(f"{_period(data)}. Default parameters, so nothing here was tuned on this data.\n")
+    print(shown.to_string())
 
 
 def _run_optimize(args: argparse.Namespace) -> None:
@@ -155,6 +246,9 @@ def _run_optimize(args: argparse.Namespace) -> None:
     print(f"Deflated Sharpe against zero: {search.deflated_sharpe:.1%}")
     print(f"Deflated Sharpe against buy and hold: {search.deflated_active_sharpe:.1%}")
     print(probability_verdict(search.deflated_active_sharpe))
+    if search.overfitting is not None:
+        print(f"Probability of backtest overfitting: {search.overfitting.probability:.1%}")
+        print(overfitting_verdict(search.overfitting.probability))
 
 
 def _run_walk_forward(args: argparse.Namespace) -> None:
@@ -182,6 +276,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     commands = {
         "backtest": _run_backtest,
+        "report": _run_report,
+        "compare": _run_compare,
         "optimize": _run_optimize,
         "walk-forward": _run_walk_forward,
     }

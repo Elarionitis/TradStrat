@@ -16,7 +16,7 @@ import pandas as pd
 
 from tradstrat.engine import BacktestConfig, BacktestResult, run_backtest
 from tradstrat.metrics import Metrics, calculate_metrics, daily_returns, sharpe_ratio
-from tradstrat.stats import deflated_sharpe_ratio
+from tradstrat.stats import OverfittingResult, deflated_sharpe_ratio, probability_of_backtest_overfitting
 from tradstrat.strategies import STRATEGIES, BuyAndHoldStrategy, create_strategy
 
 OBJECTIVES: Final[tuple[str, ...]] = (
@@ -62,16 +62,26 @@ def _benchmark_returns(data: pd.DataFrame, config: BacktestConfig) -> pd.Series:
     return daily_returns(result.results["Strategy Equity"])
 
 
+@dataclass(frozen=True)
+class _Scores:
+    """A ranked score table, plus each combination's excess returns in grid order."""
+
+    table: pd.DataFrame
+    returns: pd.DataFrame
+
+
 def _score_grid(
     data: pd.DataFrame, key: str, grid: list[Params], config: BacktestConfig, objective: str
-) -> pd.DataFrame:
-    """Backtest each combination and return a table ranked best first, with undefined scores last."""
+) -> _Scores:
+    """Backtest each combination and rank them best first, with undefined scores last."""
     benchmark_returns = _benchmark_returns(data, config)
     rows = []
-    for params in grid:
+    returns = {}
+    for number, params in enumerate(grid):
         result = run_backtest(data, create_strategy(key, **params), config, include_benchmark=False)
         metrics = result.metrics
-        active_returns = daily_returns(result.results["Strategy Equity"]) - benchmark_returns
+        active_returns = result.returns - benchmark_returns
+        returns[number] = result.excess_returns
         rows.append(
             {
                 **params,
@@ -85,10 +95,8 @@ def _score_grid(
                 "active_sharpe": sharpe_ratio(active_returns),
             }
         )
-    table = pd.DataFrame(rows)
-    return table.sort_values(objective, ascending=False, na_position="last", kind="stable").reset_index(
-        drop=True
-    )
+    table = pd.DataFrame(rows).sort_values(objective, ascending=False, na_position="last", kind="stable")
+    return _Scores(table.reset_index(drop=True), pd.DataFrame(returns))
 
 
 def _row_params(row: pd.Series, grid: list[Params]) -> Params:
@@ -104,7 +112,8 @@ class SearchResult:
     ``deflated_sharpe`` asks whether the winner made money for reasons beyond selection luck.
     ``deflated_active_sharpe`` asks the harder question of whether it beat simply holding the asset. A
     long-only strategy on a rising market passes the first test by owning the market, so the second is
-    the one that speaks to timing skill.
+    the one that speaks to timing skill. ``overfitting`` estimates how often the search's choice would
+    have fallen to the bottom half on unseen data; it is ``None`` when history is too short to split.
     """
 
     table: pd.DataFrame
@@ -113,6 +122,7 @@ class SearchResult:
     best: BacktestResult
     deflated_sharpe: float
     deflated_active_sharpe: float
+    overfitting: OverfittingResult | None = None
 
 
 def grid_search(
@@ -121,26 +131,40 @@ def grid_search(
     grid: list[Params] | None = None,
     config: BacktestConfig | None = None,
     objective: str = "sharpe_ratio",
+    *,
+    partitions: int = 16,
 ) -> SearchResult:
-    """Evaluate a parameter grid. The winner's score is in-sample, so ``deflated_sharpe`` discounts it."""
+    """Evaluate a parameter grid. The winner's score is in-sample, so ``deflated_sharpe`` discounts it.
+
+    ``partitions`` sets how finely history is cut to estimate the probability of backtest overfitting.
+    """
     _check_objective(objective)
     config = config or BacktestConfig()
     grid = grid if grid is not None else build_grid(key)
     if not grid:
         raise ValueError("The parameter grid is empty.")
 
-    table = _score_grid(data, key, grid, config, objective)
+    scores = _score_grid(data, key, grid, config, objective)
+    table = scores.table
     best_params = _row_params(table.iloc[0], grid)
     best = run_backtest(data, create_strategy(key, **best_params), config)
-    returns = daily_returns(best.results["Strategy Equity"])
-    active_returns = returns - daily_returns(best.results["Buy and Hold Benchmark"])
+    active_returns = best.returns - best.benchmark_returns
+
+    overfitting = None
+    if len(grid) >= 2:
+        try:
+            overfitting = probability_of_backtest_overfitting(scores.returns, partitions)
+        except ValueError:
+            overfitting = None  # Too little history for this many partitions.
+
     return SearchResult(
         table=table,
         objective=objective,
         best_params=best_params,
         best=best,
-        deflated_sharpe=deflated_sharpe_ratio(returns, table["sharpe_ratio"].tolist()),
+        deflated_sharpe=deflated_sharpe_ratio(best.excess_returns, table["sharpe_ratio"].tolist()),
         deflated_active_sharpe=deflated_sharpe_ratio(active_returns, table["active_sharpe"].tolist()),
+        overfitting=overfitting,
     )
 
 
@@ -209,7 +233,7 @@ def walk_forward(
         if test_end - test_start < 2:
             break
 
-        scored = _score_grid(data.iloc[train_start:test_start], key, grid, config, objective)
+        scored = _score_grid(data.iloc[train_start:test_start], key, grid, config, objective).table
         params = _row_params(scored.iloc[0], grid)
 
         # Bars before test_start warm up the indicators but cannot be traded, and bars after test_end are
@@ -248,13 +272,52 @@ def walk_forward(
     benchmark = run_backtest(
         data, BuyAndHoldStrategy(), config.for_benchmark(), start=train_bars, include_benchmark=False
     ).results["Strategy Equity"]
+    risk_free = stitched["Risk-Free Return"].iloc[1:]
 
     return WalkForwardResult(
         folds=pd.DataFrame(folds),
         equity=equity,
         benchmark=benchmark,
         trade_log=trade_log,
-        metrics=calculate_metrics(equity, trade_log, stitched["Position"]),
-        benchmark_metrics=calculate_metrics(benchmark, pd.DataFrame()),
+        metrics=calculate_metrics(equity, trade_log, stitched["Position"], risk_free=risk_free),
+        benchmark_metrics=calculate_metrics(benchmark, pd.DataFrame(), risk_free=risk_free),
         objective=objective,
     )
+
+
+@dataclass(frozen=True)
+class Comparison:
+    """Every strategy run with its default parameters on the same data, next to buy and hold."""
+
+    table: pd.DataFrame
+    equity: pd.DataFrame
+
+
+def compare_strategies(
+    data: pd.DataFrame, config: BacktestConfig | None = None, keys: list[str] | None = None
+) -> Comparison:
+    """Run each strategy with its declared defaults. No tuning happens, so nothing here is in-sample.
+
+    Strategies whose indicators need more history than ``data`` holds are left out.
+    """
+    config = config or BacktestConfig()
+    keys = keys if keys is not None else [key for key in STRATEGIES if key != BuyAndHoldStrategy.key]
+    rows = []
+    curves = {}
+    for key in keys:
+        strategy = create_strategy(key)
+        if strategy.warmup >= len(data) - 1:
+            continue
+        result = run_backtest(data, strategy, config, include_benchmark=False)
+        curves[STRATEGIES[key].label] = result.results["Strategy Equity"]
+        rows.append({"Strategy": STRATEGIES[key].label, **result.metrics.as_dict()})
+
+    if rows:
+        # Run buy and hold as a strategy of its own, so its row has a trade count and exposure too.
+        holding = run_backtest(data, BuyAndHoldStrategy(), config.for_benchmark(), include_benchmark=False)
+        curves[BuyAndHoldStrategy.label] = holding.results["Strategy Equity"]
+        rows.append({"Strategy": BuyAndHoldStrategy.label, **holding.metrics.as_dict()})
+    table = pd.DataFrame(rows)
+    if not table.empty:
+        table = table.sort_values("sharpe_ratio", ascending=False, na_position="last").reset_index(drop=True)
+    return Comparison(table=table, equity=pd.DataFrame(curves))

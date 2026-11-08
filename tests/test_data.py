@@ -16,10 +16,13 @@ from tradstrat.data import (
     _fetch_yahoo_chart,
     _fetch_yfinance,
     adjust_for_dividends,
+    attach_cash_rate,
+    fetch_cash_rate,
     fetch_ohlcv,
     load_csv,
     load_sample,
     normalize_ticker,
+    read_price_csv,
     validate_ohlcv,
 )
 
@@ -97,7 +100,7 @@ def test_high_and_low_always_bracket_open_and_close() -> None:
     assert validated["Low"].iloc[0] == 90.0
 
 
-@pytest.mark.parametrize("frame", [pd.DataFrame(), bars().drop(columns="Volume")])
+@pytest.mark.parametrize("frame", [pd.DataFrame(), bars().drop(columns="Close")])
 def test_unusable_frames_raise_a_clear_error(frame: pd.DataFrame) -> None:
     with pytest.raises(DataError):
         validate_ohlcv(frame, "X")
@@ -360,3 +363,90 @@ def test_a_fetch_outside_the_returned_range_is_an_error(
 
     with pytest.raises(DataError, match="requested range"):
         fetch_ohlcv("AAPL", "2024-01-02", "2024-01-04", cache_dir=tmp_path, use_cache=False)
+
+
+# Real-world CSV exports and the cash rate.
+
+
+def test_csv_column_names_are_matched_case_insensitively(tmp_path: Path) -> None:
+    path = tmp_path / "export.csv"
+    path.write_text(
+        "timestamp,open,high,low,close,volume,adj_close\n"
+        "2024-01-02,10,11,9,10,100,5\n"
+        "2024-01-03,10,12,10,11,100,5.5\n"
+    )
+
+    data = load_csv(path)
+
+    assert list(data.columns) == ["Open", "High", "Low", "Close", "Volume"]
+    assert data["Close"].tolist() == [5.0, 5.5]  # Scaled by the adjusted close.
+
+
+def test_csv_without_volume_is_accepted(tmp_path: Path) -> None:
+    path = tmp_path / "index.csv"
+    path.write_text("Date,Open,High,Low,Close\n2024-01-02,10,11,9,10\n2024-01-03,10,12,10,11\n")
+
+    assert (load_csv(path)["Volume"] == 0).all()
+
+
+@pytest.mark.parametrize("scale", [1, 1000])
+def test_csv_unix_timestamps_in_seconds_or_milliseconds_are_parsed(tmp_path: Path, scale: int) -> None:
+    seconds = int(pd.Timestamp("2024-01-02").timestamp())
+    path = tmp_path / "crypto.csv"
+    path.write_text(f"time,open,high,low,close\n{seconds * scale},10,11,9,10\n")
+
+    assert load_csv(path).index[0] == pd.Timestamp("2024-01-02")
+
+
+def test_uploaded_file_objects_can_be_read() -> None:
+    import io
+
+    upload = io.BytesIO(b"Date,Open,High,Low,Close\n2024-01-02,10,11,9,10\n")
+
+    assert len(read_price_csv(upload)) == 1
+
+
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    [
+        ("when,open,high,low,close\n2024-01-02,1,1,1,1\n", "date column"),
+        ("date,open,high,low,close\nnot a date,1,1,1,1\n", "parse the dates"),
+    ],
+)
+def test_csv_problems_get_a_helpful_message(tmp_path: Path, contents: str, message: str) -> None:
+    path = tmp_path / "bad.csv"
+    path.write_text(contents)
+
+    with pytest.raises(DataError, match=message):
+        load_csv(path)
+
+
+def test_a_fixed_cash_rate_fills_every_bar() -> None:
+    assert (attach_cash_rate(bars(), 0.04)["Cash Rate"] == 0.04).all()
+
+
+def test_a_cash_rate_series_carries_the_latest_published_rate_forward() -> None:
+    prices = bars(4)  # 2024-01-02 to 2024-01-05
+    rates = pd.Series([0.05, 0.03], index=pd.to_datetime(["2023-12-29", "2024-01-04"]))
+
+    attached = attach_cash_rate(prices, rates)["Cash Rate"]
+
+    assert attached.tolist() == [0.05, 0.05, 0.03, 0.03]
+
+
+def test_cash_rates_in_percent_are_rejected() -> None:
+    with pytest.raises(DataError, match="annual decimals"):
+        attach_cash_rate(bars(), 5.0)
+
+
+def test_cash_rate_comes_from_treasury_bill_yields_in_percent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    yields = bars(3).assign(Close=[5.0, 5.1, 5.2])
+    calls = stub_provider(monkeypatch, yields)
+
+    rates = fetch_cash_rate("2024-01-02", "2024-01-04", cache_dir=tmp_path)
+
+    assert calls[0][0] == "^IRX"
+    assert calls[0][1] == "2023-12-02"  # A month early, so the first bar already has a rate.
+    assert rates.tolist() == pytest.approx([0.05, 0.051, 0.052])

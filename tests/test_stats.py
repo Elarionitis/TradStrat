@@ -16,6 +16,7 @@ from tradstrat.stats import (
     expected_max_sharpe,
     probabilistic_sharpe,
     probabilistic_sharpe_ratio,
+    probability_of_backtest_overfitting,
 )
 
 
@@ -164,3 +165,71 @@ def test_bootstrap_without_a_benchmark_leaves_the_comparison_undefined() -> None
 def test_bootstrap_rejects_short_series() -> None:
     with pytest.raises(ValueError, match="at least"):
         bootstrap(noise(10))
+
+
+# Probability of backtest overfitting.
+
+
+def _configurations(columns: int, rows: int = 1600, seed: int = 0) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame(rng.normal(0.0, 0.01, size=(rows, columns)))
+
+
+def test_pure_noise_is_overfit_about_half_the_time() -> None:
+    """With no skill anywhere, the in-sample winner's out-of-sample rank is a coin flip."""
+    estimates = [
+        probability_of_backtest_overfitting(_configurations(20, seed=seed), partitions=8).probability
+        for seed in range(12)
+    ]
+
+    assert 0.35 < float(np.mean(estimates)) < 0.65
+
+
+def test_a_genuinely_better_configuration_is_not_overfit() -> None:
+    returns = _configurations(20)
+    returns[0] += 0.002  # A strong, persistent edge for one configuration.
+
+    result = probability_of_backtest_overfitting(returns, partitions=8)
+
+    assert result.probability < 0.05
+    assert result.probability_of_loss < 0.05
+
+
+def test_every_split_of_the_partitions_is_evaluated() -> None:
+    result = probability_of_backtest_overfitting(_configurations(5), partitions=10)
+
+    assert len(result.logits) == 252  # 10 choose 5.
+    assert result.partitions == 10
+
+
+def test_ranking_is_shared_fairly_across_tied_configurations() -> None:
+    """Identical columns tie, so the winner's rank is the middle and its logit is exactly zero."""
+    column = _configurations(1)[0]
+    returns = pd.concat([column] * 3, axis=1, ignore_index=True)
+
+    result = probability_of_backtest_overfitting(returns, partitions=4)
+
+    assert np.allclose(result.logits, 0.0)
+
+
+def test_a_configuration_that_never_traded_ranks_last() -> None:
+    returns = _configurations(3)
+    returns[2] = 0.0  # Flat: its Sharpe ratio is undefined.
+
+    result = probability_of_backtest_overfitting(returns, partitions=4)
+
+    assert not np.isnan(result.logits).any()
+    assert not np.isnan(result.in_sample_sharpe).any()
+
+
+@pytest.mark.parametrize(
+    ("columns", "rows", "partitions", "message"),
+    [
+        (1, 400, 8, "two configurations"),
+        (3, 400, 7, "even number"),
+        (3, 20, 8, "at least 32 returns"),
+    ],
+)
+def test_unusable_inputs_are_rejected(columns: int, rows: int, partitions: int, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        probability_of_backtest_overfitting(_configurations(columns, rows), partitions=partitions)

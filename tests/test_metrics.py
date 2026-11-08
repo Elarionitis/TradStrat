@@ -62,7 +62,7 @@ def test_sortino_sees_risk_when_every_loss_is_identical() -> None:
 def test_sharpe_subtracts_risk_free_rate() -> None:
     returns = pd.Series([0.01, 0.02, -0.005, 0.015])
 
-    assert sharpe_ratio(returns, risk_free_rate=0.05) < sharpe_ratio(returns)
+    assert sharpe_ratio(returns, risk_free=0.05) < sharpe_ratio(returns)
 
 
 def test_cagr_uses_calendar_time_when_dates_are_available() -> None:

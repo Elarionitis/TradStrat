@@ -4,11 +4,40 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tradstrat"
-description = "Event-driven backtester with walk-forward validation and overfitting diagnostics."
+description = "An event-driven backtester that tests whether a trading strategy's results can be believed."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 dynamic = ["version", "dependencies"]
+keywords = [
+    "backtesting",
+    "trading",
+    "quantitative-finance",
+    "walk-forward",
+    "overfitting",
+    "deflated-sharpe-ratio",
+    "streamlit",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Education",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/Elarionitis/TradStrat"
+Documentation = "https://github.com/Elarionitis/TradStrat/blob/main/docs/METHODOLOGY.md"
+Changelog = "https://github.com/Elarionitis/TradStrat/blob/main/CHANGELOG.md"
+Issues = "https://github.com/Elarionitis/TradStrat/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -27,6 +56,7 @@ tradstrat = "tradstrat.cli:main"
 packages = ["tradstrat", "tradstrat.sample_data"]
 
 [tool.setuptools.package-data]
+"tradstrat" = ["py.typed"]
 "tradstrat.sample_data" = ["*.csv"]
 
 [tool.setuptools.dynamic]

@@ -286,18 +286,22 @@ scenarios = st.tuples(
     st.floats(min_value=0.0, max_value=50.0),  # slippage
     st.one_of(st.none(), st.floats(min_value=0.01, max_value=0.5)),  # stop loss
     st.floats(min_value=0.1, max_value=1.0),  # position fraction
+    st.booleans(),  # trailing stop, when there is a stop
+    st.floats(min_value=0.0, max_value=0.1),  # annual cash rate
 )
 
 
 def _scenario(scenario: tuple) -> tuple[pd.DataFrame, FixedSignal, BacktestConfig]:
-    seed, bars, commission, slippage, stop_loss, fraction = scenario
+    seed, bars, commission, slippage, stop_loss, fraction, trailing, cash_rate = scenario
     data = random_walk(bars, seed=seed, volatility=0.03)
     signal = tuple(int(value) for value in np.random.default_rng(seed).integers(0, 2, bars))
     config = BacktestConfig(
         commission_rate=commission,
         slippage_bps=slippage,
         stop_loss=stop_loss,
+        trailing_stop=trailing and stop_loss is not None,
         position_fraction=fraction,
+        cash_rate=cash_rate,
     )
     return data, FixedSignal(signal), config
 
@@ -305,13 +309,14 @@ def _scenario(scenario: tuple) -> tuple[pd.DataFrame, FixedSignal, BacktestConfi
 @settings(max_examples=200, deadline=None)
 @given(scenarios)
 def test_trade_profits_reconcile_exactly_with_the_change_in_equity(scenario: tuple) -> None:
-    """Double-entry check: every dollar gained or lost must be attributable to a closed trade."""
+    """Double-entry check: every dollar gained or lost must come from a closed trade or interest."""
     data, strategy, config = _scenario(scenario)
 
     result = run_backtest(data, strategy, config)
 
     change = result.results["Strategy Equity"].iloc[-1] - config.initial_capital
-    assert result.trade_log["P&L"].sum() == pytest.approx(change, abs=1e-6)
+    explained = result.trade_log["P&L"].sum() + result.results["Interest"].sum()
+    assert explained == pytest.approx(change, abs=1e-6)
 
 
 @settings(max_examples=200, deadline=None)
@@ -354,6 +359,13 @@ def test_every_stop_exit_respects_its_stop_level_unless_gapped(scenario: tuple) 
             assert trade[4] <= stop_level * (1 - slippage) + 1e-9
             assert trade[4] >= min(bar["Open"], stop_level) * (1 - slippage) - 1e-9
 
+        # A trailing stop only ever rises from the fixed level, so it can never fill worse than one.
+        for trade in trades[trades["Exit Reason"] == "trailing_stop"].itertuples():
+            bar = data.loc[trade[2]]
+            slippage = config.slippage_bps / 10_000
+            fixed_level = trade[3] * (1 - config.stop_loss)
+            assert trade[4] >= min(bar["Open"], fixed_level) * (1 - slippage) - 1e-9
+
 
 @settings(max_examples=100, deadline=None)
 @given(scenarios)
@@ -376,7 +388,13 @@ def test_decisions_at_the_open_cannot_depend_on_that_bars_later_prices(
     Truncating history cannot catch this bug, because a same-bar close is still inside the prefix.
     """
     data, strategy, config = _scenario(scenario)
-    config = replace(config, target_volatility=target_volatility, stop_loss=None, volatility_lookback=5)
+    config = replace(
+        config,
+        target_volatility=target_volatility,
+        stop_loss=None,
+        trailing_stop=False,
+        volatility_lookback=5,
+    )
     bar = max(7, int(len(data) * location))
     altered = data.copy()
     altered.iloc[bar, altered.columns.get_loc("Close")] *= 1.5
@@ -388,3 +406,82 @@ def test_decisions_at_the_open_cannot_depend_on_that_bars_later_prices(
 
     if bar < len(data) - 1:  # The final bar is always liquidated.
         assert original_position.iloc[bar] == altered_position.iloc[bar]
+
+
+# Cash interest and trailing stops.
+
+
+def test_idle_cash_earns_the_cash_rate_over_calendar_days() -> None:
+    data = make_bars([100.0] * 6)
+    config = replace(FRICTIONLESS, cash_rate=0.0365)
+
+    result = run_backtest(data, FixedSignal((0,) * 6), config)
+
+    # Business days: Wednesday to the next Wednesday is 7 calendar days, including a weekend.
+    expected = 10_000.0 * np.prod(1 + 0.0365 * (data.index[1:] - data.index[:-1]).days / 365.25)
+    assert result.results["Strategy Equity"].iloc[-1] == pytest.approx(expected)
+    assert result.results["Interest"].sum() == pytest.approx(expected - 10_000.0)
+
+
+def test_a_cash_rate_column_overrides_the_fixed_rate_and_uses_the_prior_bars_rate() -> None:
+    data = make_bars([100.0] * 3).assign(**{"Cash Rate": [0.10, 0.0, 0.50]})
+
+    result = run_backtest(data, FixedSignal((0, 0, 0)), replace(FRICTIONLESS, cash_rate=0.3))
+
+    days = (data.index[1:] - data.index[:-1]).days
+    risk_free = result.results["Risk-Free Return"].to_numpy()
+    assert risk_free[0] == 0.0
+    assert risk_free[1] == pytest.approx(0.10 * days[0] / 365.25)
+    assert risk_free[2] == 0.0  # The 50% rate on the last bar has not had time to accrue.
+
+
+def test_sitting_in_cash_earns_the_risk_free_rate_but_no_sharpe() -> None:
+    """Interest is compensation for time, not skill, so excess returns are zero and Sharpe is undefined."""
+    data = random_walk(300)
+
+    result = run_backtest(data, FixedSignal((0,) * 300), replace(FRICTIONLESS, cash_rate=0.05))
+
+    assert result.metrics.total_return > 0.05
+    assert result.excess_returns.abs().max() < 1e-12
+    assert np.isnan(result.metrics.sharpe_ratio)
+
+
+def test_cash_rate_lowers_the_benchmarks_sharpe_ratio() -> None:
+    data = random_walk(400)
+
+    plain = run_backtest(data, BuyAndHoldStrategy(), FRICTIONLESS)
+    with_cash = run_backtest(data, BuyAndHoldStrategy(), replace(FRICTIONLESS, cash_rate=0.05))
+
+    assert with_cash.benchmark_metrics.sharpe_ratio < plain.benchmark_metrics.sharpe_ratio
+
+
+def test_trailing_stop_follows_the_highest_prior_high() -> None:
+    # Enter at 100, rally to a high of 120, then fall. A 10% trail sits at 108; a fixed stop sits at 90.
+    close = [100.0, 100, 110, 120, 115, 107, 100]
+    data = make_bars(close)
+    config = replace(FRICTIONLESS, stop_loss=0.10, trailing_stop=True)
+
+    trade = run_backtest(data, FixedSignal((1,) * 7), config).trade_log.iloc[0]
+
+    assert trade["Exit Reason"] == "trailing_stop"
+    assert trade["Exit Date"] == data.index[5]
+    assert trade["Exit Price"] == pytest.approx(min(data["Open"].iloc[5], 120 * 0.9))
+
+
+def test_trailing_stop_ignores_the_current_bars_high() -> None:
+    """A bar that sets a new high and then falls cannot be stopped by its own high."""
+    data = make_bars([100.0, 100, 100])
+    data.loc[data.index[2], ["High", "Low"]] = [130.0, 110.0]
+    data.loc[data.index[2], ["Open", "Close"]] = [115.0, 115.0]
+
+    trades = run_backtest(
+        data, FixedSignal((1, 1, 1)), replace(FRICTIONLESS, stop_loss=0.10, trailing_stop=True)
+    ).trade_log
+
+    assert list(trades["Exit Reason"]) == ["end_of_data"]
+
+
+@pytest.mark.parametrize("kwargs", [{"trailing_stop": True}, {"cash_rate": 0.9}, {"cash_rate": -0.2}])
+def test_invalid_cash_and_trailing_settings_are_rejected(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        BacktestConfig(**kwargs)  # type: ignore[arg-type]

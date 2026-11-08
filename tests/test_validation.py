@@ -12,7 +12,7 @@ from conftest import make_bars, random_walk
 
 from tradstrat.engine import BacktestConfig, run_backtest
 from tradstrat.strategies import create_strategy
-from tradstrat.validation import OBJECTIVES, build_grid, grid_search, walk_forward
+from tradstrat.validation import OBJECTIVES, build_grid, compare_strategies, grid_search, walk_forward
 
 GRID = [
     {"short_window": 5, "long_window": 20},
@@ -235,3 +235,62 @@ def test_a_short_final_window_is_still_used() -> None:
 def test_impossible_windows_are_rejected(bars: int, kwargs: dict[str, int], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         run_walk_forward(random_walk(bars), **kwargs)
+
+
+def test_search_estimates_the_probability_of_overfitting(walk: pd.DataFrame) -> None:
+    result = grid_search(walk, "ma_crossover", GRID, partitions=8)
+
+    assert result.overfitting is not None
+    assert 0.0 <= result.overfitting.probability <= 1.0
+    assert len(result.overfitting.logits) == 70  # 8 choose 4.
+
+
+def test_overfitting_is_skipped_when_history_is_too_short_to_split() -> None:
+    result = grid_search(random_walk(60), "ma_crossover", GRID, partitions=16)
+
+    assert result.overfitting is None
+
+
+def test_a_single_configuration_has_nothing_to_overfit(walk: pd.DataFrame) -> None:
+    assert grid_search(walk, "ma_crossover", GRID[:1]).overfitting is None
+
+
+def test_walk_forward_sharpe_is_measured_above_the_cash_rate() -> None:
+    data = random_walk(800)
+
+    plain = run_walk_forward(data)
+    with_cash = walk_forward(
+        data, "ma_crossover", GRID, BacktestConfig(cash_rate=0.04), train_bars=200, test_bars=100
+    )
+
+    assert with_cash.benchmark_metrics.sharpe_ratio < plain.benchmark_metrics.sharpe_ratio
+
+
+def test_comparison_runs_every_strategy_and_buy_and_hold(walk: pd.DataFrame) -> None:
+    comparison = compare_strategies(walk)
+
+    assert set(comparison.table["Strategy"]) == {
+        "Moving Average Crossover",
+        "Mean Reversion (Z-Score)",
+        "RSI Reversal",
+        "Donchian Breakout",
+        "Time-Series Momentum",
+        "Buy and Hold",
+    }
+    assert list(comparison.equity.columns)[-1] == "Buy and Hold"
+    assert comparison.table["sharpe_ratio"].is_monotonic_decreasing
+
+
+def test_comparison_matches_a_direct_backtest(walk: pd.DataFrame) -> None:
+    comparison = compare_strategies(walk, keys=["rsi"])
+
+    direct = run_backtest(walk, create_strategy("rsi"))
+    row = comparison.table.set_index("Strategy").loc["RSI Reversal"]
+    assert row["total_return"] == pytest.approx(direct.metrics.total_return)
+
+
+def test_comparison_skips_strategies_without_enough_history() -> None:
+    comparison = compare_strategies(random_walk(100))
+
+    assert "Moving Average Crossover" not in set(comparison.table["Strategy"])
+    assert "RSI Reversal" in set(comparison.table["Strategy"])

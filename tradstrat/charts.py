@@ -1,24 +1,25 @@
-"""Plotly figures for the dashboard.
+"""Plotly figures shared by the dashboard and the HTML report.
 
-Colors are assigned by role and were checked with a color-vision-deficiency validator. Every multi-series
-chart has a legend, equity curves are also labeled directly, and buy and sell markers differ in shape, so
-identity never rests on color alone. Heatmaps of signed values use a diverging scale centered on zero.
+Every figure takes a ``ChartTheme``, so the same chart renders correctly on a light or a dark page. Colors
+are assigned by role, never by rank, and the palettes were checked with a color-vision-deficiency
+validator in both modes. Every multi-series chart has a legend, the key lines are also labeled directly,
+and buy and sell markers differ in shape, so identity never rests on color alone. Heatmaps of signed
+values use a diverging blue and red scale with a neutral gray midpoint at zero.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Final
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-STRATEGY_COLOR: Final[str] = "#2a78d6"
-BENCHMARK_COLOR: Final[str] = "#eb6834"
-BUY_COLOR: Final[str] = "#1baf7a"
-GRID_COLOR: Final[str] = "#e8e7e3"
-MUTED_COLOR: Final[str] = "#52514e"
-DIVERGING_SCALE: Final[list[list[Any]]] = [[0.0, "#eb6834"], [0.5, "#f1f0ec"], [1.0, "#2a78d6"]]
+from tradstrat.metrics import calendar_year_returns, rolling_sharpe
+from tradstrat.strategies import STRATEGIES, BuyAndHoldStrategy
+
+FONT_FAMILY: Final[str] = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif"
 MONTHS: Final[list[str]] = [
     "Jan",
     "Feb",
@@ -35,66 +36,236 @@ MONTHS: Final[list[str]] = [
 ]
 
 
-def _style(figure: go.Figure, title: str, y_title: str = "", x_title: str = "") -> go.Figure:
+@dataclass(frozen=True)
+class ChartTheme:
+    """The colors a figure needs, chosen separately for light and dark surfaces."""
+
+    name: str
+    strategy: str
+    benchmark: str
+    buy: str
+    sell: str
+    positive: str
+    negative: str
+    neutral: str
+    ink: str
+    secondary: str
+    muted: str
+    grid: str
+    axis: str
+    hover_background: str
+    # Strategy identity colors in registry order. The benchmark always keeps ``benchmark``.
+    series: tuple[str, ...]
+
+
+LIGHT: Final[ChartTheme] = ChartTheme(
+    name="light",
+    strategy="#2a78d6",
+    benchmark="#eb6834",
+    buy="#1baf7a",
+    sell="#eb6834",
+    positive="#2a78d6",
+    negative="#e34948",
+    neutral="#f0efec",
+    ink="#0b0b0b",
+    secondary="#52514e",
+    muted="#898781",
+    grid="#e1e0d9",
+    axis="#c3c2b7",
+    hover_background="#ffffff",
+    series=("#2a78d6", "#1baf7a", "#eda100", "#e87ba4", "#6250d6"),
+)
+DARK: Final[ChartTheme] = ChartTheme(
+    name="dark",
+    strategy="#3987e5",
+    benchmark="#d95926",
+    buy="#199e70",
+    sell="#d95926",
+    positive="#3987e5",
+    negative="#e66767",
+    neutral="#383835",
+    ink="#f0efec",
+    secondary="#c3c2b7",
+    muted="#898781",
+    grid="#2c2c2a",
+    axis="#383835",
+    hover_background="#1a1a19",
+    series=("#3987e5", "#199e70", "#c98500", "#d55181", "#9085e9"),
+)
+
+
+def theme_for(dark: bool) -> ChartTheme:
+    return DARK if dark else LIGHT
+
+
+def strategy_color(label: str, theme: ChartTheme) -> str:
+    """A fixed color per strategy, so a filter that hides one never repaints the others."""
+    if label == BuyAndHoldStrategy.label:
+        return theme.benchmark
+    labels = [cls.label for key, cls in STRATEGIES.items() if key != BuyAndHoldStrategy.key]
+    position = labels.index(label) if label in labels else len(labels)
+    return theme.series[position % len(theme.series)]
+
+
+def _style(
+    figure: go.Figure, theme: ChartTheme, title: str, y_title: str = "", x_title: str = "", height: int = 380
+) -> go.Figure:
     """Apply the shared layout: recessive grid, one axis, legend above the plot."""
     figure.update_layout(
-        title={"text": title, "x": 0, "xanchor": "left"},
-        margin={"l": 10, "r": 10, "t": 70, "b": 10},
+        template="none",
+        height=height,
+        title={"text": title, "x": 0, "xanchor": "left", "font": {"size": 15, "color": theme.ink}},
+        margin={"l": 8, "r": 16, "t": 64, "b": 8},
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.0, "x": 0},
-        font={"color": MUTED_COLOR},
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.0,
+            "x": 0,
+            "font": {"color": theme.secondary},
+            "bgcolor": "rgba(0,0,0,0)",
+        },
+        font={"family": FONT_FAMILY, "color": theme.secondary, "size": 12},
+        hoverlabel={
+            "bgcolor": theme.hover_background,
+            "bordercolor": theme.axis,
+            "font": {"family": FONT_FAMILY, "color": theme.ink},
+        },
     )
-    figure.update_xaxes(title=x_title, showgrid=False, linecolor=GRID_COLOR)
-    figure.update_yaxes(title=y_title, gridcolor=GRID_COLOR, zerolinecolor=GRID_COLOR)
+    figure.update_xaxes(
+        title=x_title,
+        showgrid=False,
+        linecolor=theme.axis,
+        tickcolor=theme.axis,
+        tickfont={"color": theme.muted},
+        zeroline=False,
+        automargin=True,
+    )
+    figure.update_yaxes(
+        title=y_title,
+        gridcolor=theme.grid,
+        zerolinecolor=theme.axis,
+        tickfont={"color": theme.muted},
+        title_font={"color": theme.muted},
+        automargin=True,
+    )
     return figure
 
 
-def _line(series: pd.Series, name: str, color: str) -> go.Scatter:
-    return go.Scatter(x=series.index, y=series, name=name, mode="lines", line={"width": 2, "color": color})
+def _crosshair(figure: go.Figure, theme: ChartTheme) -> None:
+    """A vertical guide and a single tooltip for every series at the hovered date."""
+    figure.update_layout(hovermode="x unified")
+    figure.update_xaxes(
+        showspikes=True, spikemode="across", spikethickness=1, spikecolor=theme.muted, spikedash="solid"
+    )
 
 
-def _label_line_end(figure: go.Figure, series: pd.Series, text: str) -> None:
+def _line(
+    series: pd.Series, name: str, color: str, *, width: float = 2, dash: str = "solid", **kwargs: Any
+) -> go.Scatter:
+    return go.Scatter(
+        x=series.index,
+        y=series,
+        name=name,
+        mode="lines",
+        line={"width": width, "color": color, "dash": dash},
+        **kwargs,
+    )
+
+
+def _label_line_end(figure: go.Figure, series: pd.Series, text: str, theme: ChartTheme) -> None:
     """Name a line at its last point, so a reader need not match colors against the legend."""
+    clean = series.dropna()
+    if clean.empty:
+        return
     figure.add_annotation(
-        x=series.index[-1], y=float(series.iloc[-1]), text=text, showarrow=False, xanchor="left", xshift=6
+        x=clean.index[-1],
+        y=float(clean.iloc[-1]),
+        text=text,
+        showarrow=False,
+        xanchor="left",
+        xshift=6,
+        font={"color": theme.secondary, "size": 12},
     )
 
 
-def equity_figure(strategy: pd.Series, benchmark: pd.Series, title: str = "Equity Curve") -> go.Figure:
+def equity_figure(
+    strategy: pd.Series,
+    benchmark: pd.Series,
+    theme: ChartTheme = LIGHT,
+    title: str = "Growth of the portfolio",
+    *,
+    log_scale: bool = False,
+) -> go.Figure:
     figure = go.Figure(
         [
-            _line(strategy, "Strategy", STRATEGY_COLOR),
-            _line(benchmark, "Buy and Hold", BENCHMARK_COLOR),
+            _line(benchmark, "Buy and Hold", theme.benchmark),
+            _line(strategy, "Strategy", theme.strategy),
         ]
     )
-    _label_line_end(figure, strategy, "Strategy")
-    _label_line_end(figure, benchmark, "Buy and Hold")
-    figure.update_layout(hovermode="x unified")
-    figure.update_yaxes(tickprefix="$", separatethousands=True)
-    _style(figure, title, "Portfolio value")
-    figure.update_layout(margin={"r": 95})
+    _label_line_end(figure, strategy, "Strategy", theme)
+    _label_line_end(figure, benchmark, "Buy and Hold", theme)
+    _crosshair(figure, theme)
+    figure.update_traces(hovertemplate="$%{y:,.0f}")
+    figure.update_yaxes(tickprefix="$", separatethousands=True, type="log" if log_scale else "linear")
+    _style(figure, theme, title, "Portfolio value", height=420)
+    figure.update_layout(margin={"r": 100})
+    _fit_dates(figure, strategy.index)
     return figure
 
 
-def drawdown_figure(strategy: pd.Series, benchmark: pd.Series) -> go.Figure:
+def _fit_dates(figure: go.Figure, index: pd.Index) -> None:
+    """Pin the date axis to the data, so end labels and markers do not pad it with empty years."""
+    if len(index):
+        figure.update_xaxes(range=[index[0], index[-1]])
+
+
+def drawdown_figure(strategy: pd.Series, benchmark: pd.Series, theme: ChartTheme = LIGHT) -> go.Figure:
     figure = go.Figure(
         [
-            _line(strategy, "Strategy", STRATEGY_COLOR),
-            _line(benchmark, "Buy and Hold", BENCHMARK_COLOR),
+            _line(benchmark, "Buy and Hold", theme.benchmark),
+            _line(
+                strategy, "Strategy", theme.strategy, fill="tozeroy", fillcolor=_alpha(theme.strategy, 0.14)
+            ),
         ]
     )
-    figure.update_layout(hovermode="x unified")
+    _crosshair(figure, theme)
+    figure.update_traces(hovertemplate="%{y:.1%}")
     figure.update_yaxes(tickformat=".0%")
-    return _style(figure, "Drawdown", "Decline from peak")
+    return _style(figure, theme, "Drawdown from peak", "Decline")
 
 
-def price_figure(close: pd.Series, trades: pd.DataFrame) -> go.Figure:
-    figure = go.Figure([_line(close, "Close", STRATEGY_COLOR)])
+def _alpha(color: str, opacity: float) -> str:
+    red, green, blue = (int(color[index : index + 2], 16) for index in (1, 3, 5))
+    return f"rgba({red},{green},{blue},{opacity})"
+
+
+def price_figure(
+    close: pd.Series,
+    trades: pd.DataFrame,
+    theme: ChartTheme = LIGHT,
+    overlays: pd.DataFrame | None = None,
+) -> go.Figure:
+    """Price with the strategy's own indicator lines and every entry and exit."""
+    figure = go.Figure([_line(close, "Close", theme.strategy, width=1.5)])
+    if overlays is not None:
+        # Indicator lines share one recessive color and differ by dash, so the trades stay prominent.
+        for column, dash in zip(overlays.columns, ("dot", "dash", "dashdot"), strict=False):
+            figure.add_trace(
+                _line(
+                    overlays[column],
+                    str(column),
+                    theme.secondary,
+                    width=1.25,
+                    dash=dash,
+                    hovertemplate="%{y:.2f}",
+                )
+            )
     if not trades.empty:
         for name, date, price, symbol, color in (
-            ("Buy", "Entry Date", "Entry Price", "triangle-up", BUY_COLOR),
-            ("Sell", "Exit Date", "Exit Price", "triangle-down", BENCHMARK_COLOR),
+            ("Buy", "Entry Date", "Entry Price", "triangle-up", theme.buy),
+            ("Sell", "Exit Date", "Exit Price", "triangle-down", theme.sell),
         ):
             figure.add_trace(
                 go.Scatter(
@@ -102,16 +273,19 @@ def price_figure(close: pd.Series, trades: pd.DataFrame) -> go.Figure:
                     y=trades[price],
                     name=name,
                     mode="markers",
+                    hovertemplate=f"{name} at %{{y:.2f}}<extra></extra>",
                     marker={
                         "symbol": symbol,
-                        "size": 10,
+                        "size": 11,
                         "color": color,
-                        "line": {"width": 1, "color": "white"},
+                        "line": {"width": 1.5, "color": theme.hover_background},
                     },
                 )
             )
+    _crosshair(figure, theme)
     figure.update_layout(hovermode="closest")
-    return _style(figure, "Price and Trades", "Price (dividend-adjusted)")
+    _fit_dates(figure, close.index)
+    return _style(figure, theme, "Price, indicators and trades", "Price (dividend-adjusted)", height=440)
 
 
 def monthly_returns_table(equity: pd.Series) -> pd.DataFrame:
@@ -124,7 +298,11 @@ def monthly_returns_table(equity: pd.Series) -> pd.DataFrame:
     return frame.pivot_table(index="year", columns="month", values="value").reindex(columns=range(1, 13))
 
 
-def monthly_returns_figure(equity: pd.Series) -> go.Figure:
+def _diverging(theme: ChartTheme) -> list[list[Any]]:
+    return [[0.0, theme.negative], [0.5, theme.neutral], [1.0, theme.positive]]
+
+
+def monthly_returns_figure(equity: pd.Series, theme: ChartTheme = LIGHT) -> go.Figure:
     table = monthly_returns_table(equity)
     limit = float(np.nanmax(np.abs(table.to_numpy()))) or 1.0
     figure = go.Figure(
@@ -132,43 +310,92 @@ def monthly_returns_figure(equity: pd.Series) -> go.Figure:
             z=table.to_numpy(),
             x=MONTHS,
             y=[str(year) for year in table.index],
-            colorscale=DIVERGING_SCALE,
+            colorscale=_diverging(theme),
             zmin=-limit,
             zmax=limit,
             xgap=2,
             ygap=2,
-            colorbar={"tickformat": ".0%", "title": ""},
+            colorbar={
+                "tickformat": ".0%",
+                "title": "",
+                "outlinewidth": 0,
+                "tickfont": {"color": theme.muted},
+            },
             hovertemplate="%{x} %{y}: %{z:.2%}<extra></extra>",
         )
     )
     figure.update_yaxes(autorange="reversed", type="category")
-    _style(figure, "Monthly Returns")
+    _style(figure, theme, "Monthly returns")
     figure.update_yaxes(showgrid=False)
     return figure
 
 
-def bootstrap_figure(samples: np.ndarray, low: float, high: float, observed: float) -> go.Figure:
+def annual_returns_figure(strategy: pd.Series, benchmark: pd.Series, theme: ChartTheme = LIGHT) -> go.Figure:
+    """Calendar-year returns side by side, which shows which kinds of year a strategy helps in."""
+    strategy_years = calendar_year_returns(strategy)
+    benchmark_years = calendar_year_returns(benchmark)
+    years = [str(year) for year in strategy_years.index]
+    figure = go.Figure(
+        [
+            go.Bar(x=years, y=strategy_years, name="Strategy", marker={"color": theme.strategy}),
+            go.Bar(x=years, y=benchmark_years, name="Buy and Hold", marker={"color": theme.benchmark}),
+        ]
+    )
+    figure.update_traces(hovertemplate="%{y:.1%}", marker_cornerradius=4)
+    figure.update_layout(barmode="group", bargap=0.25, bargroupgap=0.08, hovermode="x unified")
+    figure.update_yaxes(tickformat=".0%")
+    figure.update_xaxes(type="category")
+    return _style(figure, theme, "Calendar-year returns", "Return")
+
+
+def rolling_sharpe_figure(
+    strategy_returns: pd.Series, benchmark_returns: pd.Series, theme: ChartTheme = LIGHT, window: int = 252
+) -> go.Figure:
+    figure = go.Figure(
+        [
+            _line(rolling_sharpe(benchmark_returns, window), "Buy and Hold", theme.benchmark),
+            _line(rolling_sharpe(strategy_returns, window), "Strategy", theme.strategy),
+        ]
+    )
+    figure.add_hline(y=0, line={"color": theme.axis, "width": 1})
+    _crosshair(figure, theme)
+    figure.update_traces(hovertemplate="%{y:.2f}")
+    return _style(figure, theme, f"Rolling Sharpe ratio ({window} bars)", "Sharpe ratio")
+
+
+def bootstrap_figure(
+    samples: np.ndarray, low: float, high: float, observed: float, theme: ChartTheme = LIGHT
+) -> go.Figure:
     figure = go.Figure(
         go.Histogram(
-            x=samples[~np.isnan(samples)], nbinsx=50, marker={"color": STRATEGY_COLOR}, name="Resamples"
+            x=samples[~np.isnan(samples)],
+            nbinsx=50,
+            marker={"color": theme.strategy, "line": {"width": 1, "color": theme.hover_background}},
+            name="Resamples",
+            hovertemplate="Sharpe %{x}<br>%{y} resamples<extra></extra>",
         )
     )
-    figure.update_traces(marker_line={"width": 2, "color": "white"})
-    figure.add_vline(x=0, line={"color": MUTED_COLOR, "width": 1})
+    figure.add_vline(x=0, line={"color": theme.muted, "width": 1})
     for value, label in ((low, "2.5%"), (high, "97.5%")):
         figure.add_vline(
-            x=value, line={"color": MUTED_COLOR, "width": 2, "dash": "dash"}, annotation_text=label
+            x=value,
+            line={"color": theme.secondary, "width": 1.5, "dash": "dash"},
+            annotation_text=label,
+            annotation_font_color=theme.secondary,
         )
     figure.add_vline(
         x=observed,
-        line={"color": BENCHMARK_COLOR, "width": 2},
+        line={"color": theme.benchmark, "width": 2},
         annotation_text="Observed",
         annotation_position="top left",
+        annotation_font_color=theme.secondary,
     )
-    return _style(figure, "Bootstrap Distribution of the Sharpe Ratio", "Resamples", "Sharpe ratio")
+    return _style(figure, theme, "Bootstrap distribution of the Sharpe ratio", "Resamples", "Sharpe ratio")
 
 
-def search_figure(table: pd.DataFrame, parameters: list[str], objective: str) -> go.Figure:
+def search_figure(
+    table: pd.DataFrame, parameters: list[str], objective: str, theme: ChartTheme = LIGHT
+) -> go.Figure:
     """Show how the objective varies across parameters: a line for one, a heatmap for two or more.
 
     A broad plateau suggests a robust idea, and an isolated peak suggests a fitted one. With three or more
@@ -182,11 +409,16 @@ def search_figure(table: pd.DataFrame, parameters: list[str], objective: str) ->
                 x=ordered[parameters[0]],
                 y=ordered[objective],
                 mode="lines+markers",
-                line={"width": 2, "color": STRATEGY_COLOR},
-                marker={"size": 8, "color": STRATEGY_COLOR},
+                line={"width": 2, "color": theme.strategy},
+                marker={
+                    "size": 8,
+                    "color": theme.strategy,
+                    "line": {"width": 2, "color": theme.hover_background},
+                },
+                hovertemplate=f"{parameters[0]}=%{{x}}<br>{label}=%{{y:.2f}}<extra></extra>",
             )
         )
-        return _style(figure, f"{label} by Parameter", label, parameters[0])
+        return _style(figure, theme, f"{label} by parameter", label, parameters[0])
 
     x_name, y_name = parameters[:2]
     grid = table.pivot_table(index=y_name, columns=x_name, values=objective, aggfunc="max")
@@ -196,34 +428,91 @@ def search_figure(table: pd.DataFrame, parameters: list[str], objective: str) ->
             z=grid.to_numpy(),
             x=[str(value) for value in grid.columns],
             y=[str(value) for value in grid.index],
-            colorscale=DIVERGING_SCALE,
+            colorscale=_diverging(theme),
             zmin=-limit,
             zmax=limit,
             xgap=2,
             ygap=2,
+            colorbar={"outlinewidth": 0, "tickfont": {"color": theme.muted}},
             hovertemplate=f"{x_name}=%{{x}}<br>{y_name}=%{{y}}<br>{label}=%{{z:.2f}}<extra></extra>",
         )
     )
-    _style(figure, f"{label} Across the Parameter Grid", y_name, x_name)
+    _style(figure, theme, f"{label} across the parameter grid", y_name, x_name)
     figure.update_yaxes(showgrid=False, type="category")
     figure.update_xaxes(type="category")
     return figure
 
 
-def fold_scores_figure(folds: pd.DataFrame, objective: str) -> go.Figure:
+def overfitting_figure(logits: np.ndarray, theme: ChartTheme = LIGHT) -> go.Figure:
+    """Where the in-sample winner ranked out of sample, across every split of the history.
+
+    Mass left of zero means the winner fell to the bottom half on unseen data: the search was fitting noise.
+    """
+    finite = logits[np.isfinite(logits)]
+    figure = go.Figure(
+        go.Histogram(
+            x=finite,
+            nbinsx=40,
+            marker={"color": theme.strategy, "line": {"width": 1, "color": theme.hover_background}},
+            hovertemplate="Logit %{x}<br>%{y} splits<extra></extra>",
+            name="Splits",
+        )
+    )
+    figure.add_vline(
+        x=0,
+        line={"color": theme.negative, "width": 2},
+        annotation_text="Median rank",
+        annotation_position="top right",
+        annotation_font_color=theme.secondary,
+    )
+    return _style(
+        figure,
+        theme,
+        "Out-of-sample rank of the in-sample winner",
+        "Splits",
+        "Relative rank, as a logit (left of zero means below the median)",
+    )
+
+
+def fold_scores_figure(folds: pd.DataFrame, objective: str, theme: ChartTheme = LIGHT) -> go.Figure:
     """Compare what each fold's parameters promised in training with what they delivered afterwards."""
     label = objective.replace("_", " ").title()
     names = [f"Fold {fold}" for fold in folds["Fold"]]
     figure = go.Figure(
         [
-            go.Bar(x=names, y=folds["In-Sample Score"], name="In-sample", marker={"color": BENCHMARK_COLOR}),
+            go.Bar(x=names, y=folds["In-Sample Score"], name="In-sample", marker={"color": theme.benchmark}),
             go.Bar(
                 x=names,
                 y=folds["Out-of-Sample Score"],
                 name="Out-of-sample",
-                marker={"color": STRATEGY_COLOR},
+                marker={"color": theme.strategy},
             ),
         ]
     )
-    figure.update_layout(barmode="group", bargap=0.3, bargroupgap=0.05, hovermode="x unified")
-    return _style(figure, f"{label}: Promised vs Delivered", label)
+    figure.update_traces(hovertemplate="%{y:.2f}", marker_cornerradius=4)
+    figure.update_layout(barmode="group", bargap=0.3, bargroupgap=0.08, hovermode="x unified")
+    return _style(figure, theme, f"{label}: promised vs delivered", label)
+
+
+def comparison_figure(
+    equity: pd.DataFrame, theme: ChartTheme = LIGHT, *, log_scale: bool = True
+) -> go.Figure:
+    """Every strategy's equity on one log scale, so equal percentage moves look equal across time."""
+    figure = go.Figure(
+        [
+            _line(
+                equity[column],
+                column,
+                strategy_color(column, theme),
+                width=2.5 if column == BuyAndHoldStrategy.label else 1.75,
+                hovertemplate="$%{y:,.0f}",
+            )
+            for column in equity.columns
+        ]
+    )
+    _crosshair(figure, theme)
+    figure.update_yaxes(tickprefix="$", separatethousands=True, type="log" if log_scale else "linear")
+    _style(figure, theme, "Every strategy at its default settings", "Portfolio value", height=480)
+    # Six names do not fit on one line above the plot, so the legend moves below it.
+    figure.update_layout(legend={"yanchor": "top", "y": -0.12}, margin={"b": 8})
+    return figure
