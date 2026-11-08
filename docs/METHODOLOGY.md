@@ -15,12 +15,23 @@ the stop price and the open. Without the open, a gap through the stop would fill
 traded. After a stop the strategy stays flat until its signal resets, or the next bar would buy straight
 back in.
 
+**Trailing stops.** A trailing stop rests at `peak * (1 - stop_loss)`, where `peak` starts at the entry fill
+and rises to the highest high of each completed bar. The current bar's high is added only after its low has
+been checked. A daily bar does not say whether its high came before its low, and assuming it did would let the
+stop ratchet up and fill on the same bar, which is a quiet form of look-ahead.
+
+**Cash interest.** Uninvested cash earns interest before each open, at the rate known at the previous close,
+over the calendar days since that close: `cash * rate * days / 365.25`. A Monday therefore collects the
+weekend's interest. The rate is either fixed or the 13-week US Treasury bill yield (Yahoo's `^IRX`), carried
+forward onto each trading day. Interest is recorded per bar, so the trade log plus interest reconciles exactly
+with the change in equity.
+
 **Volatility targeting.** Position size at entry is `min(position_fraction, target / realized_volatility)`,
 with volatility estimated up to the previous bar. No position opens until an estimate exists. Sizing
 happens at entry only, and positions are not rebalanced while open.
 
 **Liquidation.** Any open position is sold at the final close, so all P&L is realized and the trade log
-reconciles with the change in equity.
+and interest reconcile with the change in equity.
 
 **Benchmark.** Buy and hold runs through the same simulator, with the same costs, but without the strategy's
 position limit, stop or volatility target.
@@ -33,9 +44,14 @@ open, high, low and close by `Adj Close / Close`, so that returns include divide
 
 Timestamps are normalized to dates, and high and low are widened if needed to contain the open and close.
 
+CSV files are matched by column name without regard to case, so exports that use `close`, `adj_close` or
+`timestamp` load as they are. Dates may be text or Unix timestamps in seconds or milliseconds. Volume is
+optional, because index and currency data often have none.
+
 ## Metrics
 
-Returns are simple daily returns, and annualization uses 252 trading days.
+Returns are simple daily returns, and annualization uses 252 trading days. The risk-free return `rf` is
+the cash return for each bar, which is zero unless a cash rate is set.
 
 | Metric | Definition |
 | --- | --- |
@@ -48,6 +64,11 @@ Returns are simple daily returns, and annualization uses 252 trading days.
 The Sortino denominator averages over all observations, counting gains as zero. Taking the standard
 deviation of the negative returns alone is a common mistake: a strategy that loses the same amount every
 time would then appear to have no downside risk.
+
+Measuring Sharpe on returns above cash matters once cash earns interest. A strategy that sits in Treasury
+bills earns their yield with almost no volatility, and a Sharpe ratio measured against zero would read that
+as exceptional skill. Against cash its excess return is zero and its Sharpe is undefined, which is correct.
+Alpha and beta are estimated on excess returns for the same reason.
 
 Undefined ratios are `NaN`, not zero. A flat equity curve has no Sharpe ratio, and scoring it 0.0 would rank
 a strategy that never traded above one that lost money.
@@ -93,12 +114,48 @@ nominal 5%, because the winner must clear the expected maximum by 1.645 standard
 estimate, and that is wider than the spread of the maximum itself. A low score is therefore weaker evidence
 than a high score.
 
+## Probability of Backtest Overfitting
+
+The deflated Sharpe ratio corrects one number. The probability of backtest overfitting (Bailey, Borwein,
+Lopez de Prado and Zhu, 2017) tests the search procedure itself, using combinatorially symmetric
+cross-validation:
+
+1. Record the daily excess returns of every configuration in the search, as a matrix with one column each.
+2. Cut the rows into `S` contiguous blocks, 16 by default.
+3. For each of the `C(S, S/2)` ways to pick half the blocks (12,870 for 16), call those blocks in-sample and
+   the rest out-of-sample. Find the configuration with the best in-sample Sharpe ratio and its rank `r` among
+   all `N` configurations out of sample.
+4. Convert the rank to a logit: `w = r / (N + 1)`, `logit = ln(w / (1 - w))`.
+
+The probability is the share of splits with a logit at or below zero, which means the in-sample winner ranked
+at or below the median out of sample. Choosing at random gives about 50%, and a real, persistent edge gives
+close to 0%. Every block is used both in-sample and out-of-sample, so there is no single train/test boundary
+to choose, and the result does not depend on one lucky split.
+
+Ties share the average rank, and a configuration that never traded has an undefined Sharpe ratio and ranks
+last. The calculation is vectorized from per-block sums, so all 12,870 splits take well under a second.
+
+## Verdict
+
+The dashboard, command line and HTML report share one rule for their headline:
+
+| Headline | Condition |
+| --- | --- |
+| Beat buy and hold, and probably not by luck | Higher Sharpe, and higher in at least 95% of bootstrap resamples |
+| Beat buy and hold, but it could be luck | Higher Sharpe, but below that 95% bar |
+| A smoother ride, but buy and hold did better | Lower Sharpe, but a shallower maximum drawdown |
+| Buy and hold did better | Lower Sharpe and a drawdown at least as deep |
+
+The comparison uses Sharpe ratios on excess returns, so a strategy cannot win by holding cash or by taking
+more risk. The verdict describes one backtest. Walk-forward validation is still the test of whether a tuned
+strategy works on unseen data.
+
 ## Block Bootstrap
 
 Daily returns are not independent: volatility clusters, and a long/flat strategy's returns depend on its
 position. A plain bootstrap would destroy that structure, so TradStrat resamples circular blocks of 20 days.
 Strategy and benchmark share the same resampled dates, so their comparison uses returns that occurred
-together. The default is 2,000 resamples.
+together. The default is 2,000 resamples, drawn from excess returns.
 
 ## Synthetic Dataset
 
