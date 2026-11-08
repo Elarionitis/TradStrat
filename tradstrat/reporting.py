@@ -74,10 +74,12 @@ def probability_verdict(probability: float) -> str:
     if math.isnan(probability):
         return "Not enough information to judge."
     if probability >= 0.95:
-        return "Beat buy and hold at the 95% level, even after correcting for the number of trials."
+        return "Beat buy and hold by more than luck would explain, allowing for how many settings were tried."
     if probability >= 0.5:
-        return "Not significant: the edge over buy and hold is consistent with picking the luckiest trial."
-    return "No evidence of skill: the best trial did not beat buy and hold by more than luck alone would."
+        return (
+            "Not convincing: an edge this size is what picking the luckiest of many settings would produce."
+        )
+    return "No evidence of skill: the best settings did not beat buy and hold by more than luck alone would."
 
 
 def overfitting_verdict(probability: float) -> str:
@@ -85,10 +87,10 @@ def overfitting_verdict(probability: float) -> str:
     if math.isnan(probability):
         return "Not enough history to estimate."
     if probability <= 0.1:
-        return "Low: the in-sample winner usually stayed in the top half on unseen data."
+        return "Low: the winning settings usually stayed in the top half on unseen data."
     if probability < 0.5:
-        return "Moderate: the in-sample winner often slipped to the bottom half on unseen data."
-    return "High: picking the in-sample winner did no better than picking at random."
+        return "Moderate: the winning settings often slipped to the bottom half on unseen data."
+    return "High: picking the winner in hindsight did no better than picking settings at random."
 
 
 @dataclass(frozen=True)
@@ -182,3 +184,57 @@ def assess(strategy: Metrics, benchmark: Metrics, probability_beats_benchmark: f
         tone, headline = "bad", "Buy and hold did better"
         summary = "Simply holding the asset earned more per unit of risk, with no deeper decline."
     return Verdict(tone=tone, headline=headline, summary=summary, findings=tuple(findings))
+
+
+def assess_search(deflated_sharpe: float, overfitting: float) -> Verdict:
+    """Judge whether the best setting of a search is a real edge over buy and hold, or search luck.
+
+    ``deflated_sharpe`` is the deflated Sharpe ratio of the winner against buy and hold, and ``overfitting``
+    the probability of backtest overfitting, which is NaN when the history is too short to estimate it.
+    """
+    findings = (
+        Finding(
+            "good" if deflated_sharpe >= 0.95 else "bad",
+            "Luck of the search",
+            probability_verdict(deflated_sharpe),
+        ),
+        Finding(
+            "neutral"
+            if math.isnan(overfitting)
+            else "good"
+            if overfitting <= 0.1
+            else "bad"
+            if overfitting >= 0.5
+            else "warning",
+            "Overfitting",
+            overfitting_verdict(overfitting),
+        ),
+    )
+    stable = math.isnan(overfitting) or overfitting < 0.5
+    if deflated_sharpe >= 0.95 and stable:
+        return Verdict(
+            "good",
+            "The best settings look like a real edge",
+            "They beat buy and hold by more than luck would explain. Confirm it on unseen data below.",
+            findings,
+        )
+    if deflated_sharpe >= 0.95:
+        return Verdict(
+            "warning",
+            "Promising, but fragile",
+            "The winner beat buy and hold, but winners chosen this way often fail on new data.",
+            findings,
+        )
+    if not stable:
+        return Verdict(
+            "bad",
+            "The best settings look like luck",
+            "Try enough settings and one will look good. Nothing here suggests it would keep working.",
+            findings,
+        )
+    return Verdict(
+        "warning",
+        "No clear edge over buy and hold",
+        "The best settings did not beat buy and hold by more than trying many settings would explain.",
+        findings,
+    )

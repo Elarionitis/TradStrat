@@ -132,8 +132,8 @@ class MovingAverageCrossoverStrategy(Strategy):
     label: ClassVar[str] = "Moving Average Crossover"
     description: ClassVar[str] = "Long while a fast moving average is above a slow one."
     params: ClassVar[tuple[ParamSpec, ...]] = (
-        ParamSpec("short_window", "Short Window", 50, 5, 100, 5, "Bars in the fast moving average."),
-        ParamSpec("long_window", "Long Window", 200, 20, 300, 10, "Bars in the slow moving average."),
+        ParamSpec("short_window", "Short Window", 50, 5, 100, 5, "Trading days in the fast moving average."),
+        ParamSpec("long_window", "Long Window", 200, 20, 300, 10, "Trading days in the slow moving average."),
     )
     overlays: ClassVar[tuple[tuple[str, str], ...]] = (
         ("short_ma", "Fast average"),
@@ -173,9 +173,33 @@ class MeanReversionStrategy(Strategy):
     label: ClassVar[str] = "Mean Reversion (Z-Score)"
     description: ClassVar[str] = "Buy when the rolling z-score is deeply negative; exit as it recovers."
     params: ClassVar[tuple[ParamSpec, ...]] = (
-        ParamSpec("lookback_window", "Lookback Window", 20, 5, 100, 5, "Bars in the rolling mean and std."),
-        ParamSpec("entry_threshold", "Entry Threshold", 1.5, 0.5, 3.0, 0.1, "Enter at z <= -threshold."),
-        ParamSpec("exit_threshold", "Exit Threshold", 0.0, -0.5, 2.0, 0.1, "Exit at z >= threshold."),
+        ParamSpec(
+            "lookback_window",
+            "Lookback Window",
+            20,
+            5,
+            100,
+            5,
+            "Trading days used for the average and the usual swing.",
+        ),
+        ParamSpec(
+            "entry_threshold",
+            "Entry Threshold",
+            1.5,
+            0.5,
+            3.0,
+            0.1,
+            "Buy when the price is this many standard deviations below average.",
+        ),
+        ParamSpec(
+            "exit_threshold",
+            "Exit Threshold",
+            0.0,
+            -0.5,
+            2.0,
+            0.1,
+            "Sell when the z-score climbs back to this level. Zero is the average.",
+        ),
     )
 
     def __post_init__(self) -> None:
@@ -221,9 +245,13 @@ class RsiStrategy(Strategy):
     label: ClassVar[str] = "RSI Reversal"
     description: ClassVar[str] = "Buy when RSI is oversold and exit when it recovers."
     params: ClassVar[tuple[ParamSpec, ...]] = (
-        ParamSpec("window", "RSI Window", 14, 5, 30, 1, "Bars used to smooth gains and losses."),
-        ParamSpec("oversold", "Oversold Level", 30.0, 10.0, 45.0, 5.0, "Enter when RSI falls below this."),
-        ParamSpec("exit_level", "Exit Level", 55.0, 50.0, 80.0, 5.0, "Exit when RSI rises above this."),
+        ParamSpec(
+            "window", "RSI Window", 14, 5, 30, 1, "Trading days of gains and losses that RSI averages."
+        ),
+        ParamSpec(
+            "oversold", "Oversold Level", 30.0, 10.0, 45.0, 5.0, "Buy when RSI falls below this level."
+        ),
+        ParamSpec("exit_level", "Exit Level", 55.0, 50.0, 80.0, 5.0, "Sell when RSI rises above this level."),
     )
 
     def __post_init__(self) -> None:
@@ -254,8 +282,24 @@ class DonchianBreakoutStrategy(Strategy):
     label: ClassVar[str] = "Donchian Breakout"
     description: ClassVar[str] = "Buy a new N-day high; exit on a new M-day low."
     params: ClassVar[tuple[ParamSpec, ...]] = (
-        ParamSpec("entry_window", "Entry Window", 55, 10, 120, 5, "Buy a close above this many bars' high."),
-        ParamSpec("exit_window", "Exit Window", 20, 5, 60, 5, "Exit a close below this many bars' low."),
+        ParamSpec(
+            "entry_window",
+            "Entry Window",
+            55,
+            10,
+            120,
+            5,
+            "Buy a close above the highest price of this many days.",
+        ),
+        ParamSpec(
+            "exit_window",
+            "Exit Window",
+            20,
+            5,
+            60,
+            5,
+            "Sell a close below the lowest price of this many days.",
+        ),
     )
     overlays: ClassVar[tuple[tuple[str, str], ...]] = (("upper", "Entry channel"), ("lower", "Exit channel"))
 
@@ -290,7 +334,9 @@ class MomentumStrategy(Strategy):
     label: ClassVar[str] = "Time-Series Momentum"
     description: ClassVar[str] = "Long while the return over the lookback window is positive."
     params: ClassVar[tuple[ParamSpec, ...]] = (
-        ParamSpec("lookback_window", "Lookback Window", 126, 20, 252, 2, "Bars in the trailing return."),
+        ParamSpec(
+            "lookback_window", "Lookback Window", 126, 20, 252, 2, "Trading days in the trailing return."
+        ),
     )
 
     def __post_init__(self) -> None:

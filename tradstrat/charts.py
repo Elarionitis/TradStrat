@@ -360,7 +360,10 @@ def rolling_sharpe_figure(
     figure.add_hline(y=0, line={"color": theme.axis, "width": 1})
     _crosshair(figure, theme)
     figure.update_traces(hovertemplate="%{y:.2f}")
-    return _style(figure, theme, f"Rolling Sharpe ratio ({window} bars)", "Sharpe ratio")
+    title = (
+        "Sharpe ratio over the past year" if window == 252 else f"Sharpe ratio over the past {window} days"
+    )
+    return _style(figure, theme, title, "Sharpe ratio")
 
 
 def bootstrap_figure(
@@ -372,7 +375,7 @@ def bootstrap_figure(
             nbinsx=50,
             marker={"color": theme.strategy, "line": {"width": 1, "color": theme.hover_background}},
             name="Resamples",
-            hovertemplate="Sharpe %{x}<br>%{y} resamples<extra></extra>",
+            hovertemplate="Sharpe %{x}<br>%{y} histories<extra></extra>",
         )
     )
     figure.add_vline(x=0, line={"color": theme.muted, "width": 1})
@@ -386,22 +389,30 @@ def bootstrap_figure(
     figure.add_vline(
         x=observed,
         line={"color": theme.benchmark, "width": 2},
-        annotation_text="Observed",
+        annotation_text="Actual",
         annotation_position="top left",
         annotation_font_color=theme.secondary,
     )
-    return _style(figure, theme, "Bootstrap distribution of the Sharpe ratio", "Resamples", "Sharpe ratio")
+    return _style(
+        figure, theme, "Sharpe ratio across 2,000 reshuffled histories", "Histories", "Sharpe ratio"
+    )
 
 
 def search_figure(
-    table: pd.DataFrame, parameters: list[str], objective: str, theme: ChartTheme = LIGHT
+    table: pd.DataFrame,
+    parameters: list[str],
+    objective: str,
+    theme: ChartTheme = LIGHT,
+    labels: dict[str, str] | None = None,
 ) -> go.Figure:
     """Show how the objective varies across parameters: a line for one, a heatmap for two or more.
 
     A broad plateau suggests a robust idea, and an isolated peak suggests a fitted one. With three or more
-    parameters each cell shows the best score over the parameters not on the axes.
+    parameters each cell shows the best score over the parameters not on the axes. ``labels`` gives display
+    names for the parameters.
     """
     label = objective.replace("_", " ").title()
+    names = {name: (labels or {}).get(name, name) for name in parameters}
     if len(parameters) == 1:
         ordered = table.sort_values(parameters[0])
         figure = go.Figure(
@@ -415,10 +426,10 @@ def search_figure(
                     "color": theme.strategy,
                     "line": {"width": 2, "color": theme.hover_background},
                 },
-                hovertemplate=f"{parameters[0]}=%{{x}}<br>{label}=%{{y:.2f}}<extra></extra>",
+                hovertemplate=f"{names[parameters[0]]} %{{x}}<br>{label} %{{y:.2f}}<extra></extra>",
             )
         )
-        return _style(figure, theme, f"{label} by parameter", label, parameters[0])
+        return _style(figure, theme, f"{label} for each setting", label, names[parameters[0]])
 
     x_name, y_name = parameters[:2]
     grid = table.pivot_table(index=y_name, columns=x_name, values=objective, aggfunc="max")
@@ -434,10 +445,12 @@ def search_figure(
             xgap=2,
             ygap=2,
             colorbar={"outlinewidth": 0, "tickfont": {"color": theme.muted}},
-            hovertemplate=f"{x_name}=%{{x}}<br>{y_name}=%{{y}}<br>{label}=%{{z:.2f}}<extra></extra>",
+            hovertemplate=(
+                f"{names[x_name]} %{{x}}<br>{names[y_name]} %{{y}}<br>{label} %{{z:.2f}}<extra></extra>"
+            ),
         )
     )
-    _style(figure, theme, f"{label} across the parameter grid", y_name, x_name)
+    _style(figure, theme, f"{label} for every combination tried", names[y_name], names[x_name])
     figure.update_yaxes(showgrid=False, type="category")
     figure.update_xaxes(type="category")
     return figure
@@ -454,37 +467,42 @@ def overfitting_figure(logits: np.ndarray, theme: ChartTheme = LIGHT) -> go.Figu
             x=finite,
             nbinsx=40,
             marker={"color": theme.strategy, "line": {"width": 1, "color": theme.hover_background}},
-            hovertemplate="Logit %{x}<br>%{y} splits<extra></extra>",
+            hovertemplate="Rank score %{x:.2f}<br>%{y} splits<extra></extra>",
             name="Splits",
         )
     )
     figure.add_vline(
         x=0,
         line={"color": theme.negative, "width": 2},
-        annotation_text="Median rank",
+        annotation_text="Middle of the pack",
         annotation_position="top right",
         annotation_font_color=theme.secondary,
     )
     return _style(
         figure,
         theme,
-        "Out-of-sample rank of the in-sample winner",
-        "Splits",
-        "Relative rank, as a logit (left of zero means below the median)",
+        "How the hindsight winner ranked on unseen data",
+        "Splits of the history",
+        "Rank on unseen data (left of zero means the bottom half)",
     )
 
 
 def fold_scores_figure(folds: pd.DataFrame, objective: str, theme: ChartTheme = LIGHT) -> go.Figure:
     """Compare what each fold's parameters promised in training with what they delivered afterwards."""
     label = objective.replace("_", " ").title()
-    names = [f"Fold {fold}" for fold in folds["Fold"]]
+    names = [f"Window {fold}" for fold in folds["Fold"]]
     figure = go.Figure(
         [
-            go.Bar(x=names, y=folds["In-Sample Score"], name="In-sample", marker={"color": theme.benchmark}),
+            go.Bar(
+                x=names,
+                y=folds["In-Sample Score"],
+                name="Training (hindsight)",
+                marker={"color": theme.benchmark},
+            ),
             go.Bar(
                 x=names,
                 y=folds["Out-of-Sample Score"],
-                name="Out-of-sample",
+                name="Next window (unseen)",
                 marker={"color": theme.strategy},
             ),
         ]

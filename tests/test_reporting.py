@@ -11,6 +11,7 @@ from tradstrat.metrics import Metrics, calculate_metrics
 from tradstrat.reporting import (
     METRIC_LABELS,
     assess,
+    assess_search,
     comparison_table,
     format_metric,
     overfitting_verdict,
@@ -53,7 +54,7 @@ def test_comparison_hides_trade_statistics_for_the_benchmark() -> None:
     ("probability", "phrase"),
     [
         (0.97, "Beat buy and hold"),
-        (0.7, "Not significant"),
+        (0.7, "Not convincing"),
         (0.2, "No evidence"),
         (float("nan"), "Not enough"),
     ],
@@ -118,3 +119,23 @@ def test_findings_compare_each_dimension_with_buy_and_hold() -> None:
 )
 def test_overfitting_verdict_bands(probability: float, phrase: str) -> None:
     assert overfitting_verdict(probability).startswith(phrase)
+
+
+@pytest.mark.parametrize(
+    ("deflated", "overfitting", "tone", "headline"),
+    [
+        (0.98, 0.05, "good", "real edge"),
+        (0.98, float("nan"), "good", "real edge"),
+        (0.98, 0.7, "warning", "fragile"),
+        (0.30, 0.7, "bad", "luck"),
+        (0.30, 0.2, "warning", "No clear edge"),
+    ],
+)
+def test_search_verdict_needs_both_checks_to_pass(
+    deflated: float, overfitting: float, tone: str, headline: str
+) -> None:
+    verdict = assess_search(deflated, overfitting)
+
+    assert verdict.tone == tone
+    assert headline in verdict.headline
+    assert [finding.title for finding in verdict.findings] == ["Luck of the search", "Overfitting"]

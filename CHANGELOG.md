@@ -14,6 +14,10 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
   to the bottom half out of sample, using combinatorially symmetric cross-validation over 12,870 splits.
 - **Trailing stops** that follow the highest high of completed bars.
 - **A plain-English verdict** on every backtest, shared by the dashboard, the command line and the report.
+- **Help for newcomers.** The dashboard states the rule being tested in one sentence, explains every strategy
+  in plain English, opens with a short welcome, and defines jargon such as the Sharpe ratio on hover.
+- **A verdict on parameter searches** that combines the deflated Sharpe ratio and the probability of
+  overfitting into one plain answer.
 - **HTML reports.** `tradstrat report` and a dashboard button write a self-contained report with the verdict,
   interactive charts, robustness statistics and the full trade log.
 - **Strategy comparison.** `tradstrat compare` and a dashboard tab run every strategy at its defaults against
@@ -25,8 +29,9 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 
 ### Changed
 
-- The dashboard was redesigned: verdict first, KPI cards with sparklines, quick ticker and period pickers,
-  and charts that follow the light or dark theme.
+- The dashboard was redesigned around five tabs: Results, Trades, Tune, Compare and Guide. It leads with the
+  verdict, keeps advanced settings in one place, uses plain labels such as "Chance the edge is real", and its
+  charts follow the light or dark theme.
 - Search and walk-forward results are cleared when any input changes, so they can never describe other
   settings.
 - The research study in `docs/RESULTS.md` now credits idle cash with Treasury bill yields and reports the

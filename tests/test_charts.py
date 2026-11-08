@@ -94,8 +94,8 @@ def test_fold_chart_compares_in_and_out_of_sample() -> None:
     result = walk_forward(random_walk(600), "ma_crossover", grid, train_bars=200, test_bars=100)
 
     assert [trace.name for trace in fold_scores_figure(result.folds, "sharpe_ratio").data] == [
-        "In-sample",
-        "Out-of-sample",
+        "Training (hindsight)",
+        "Next window (unseen)",
     ]
 
 

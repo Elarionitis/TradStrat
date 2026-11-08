@@ -1,7 +1,7 @@
 """Streamlit dashboard for TradStrat.
 
 Run it with ``streamlit run app.py``. Every number on the page comes from the ``tradstrat`` package, so
-the dashboard, the command line and the HTML report always agree.
+the dashboard, the command line and the HTML report always agree. This file only lays the results out.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ import base64
 import html
 import io
 import math
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -44,16 +45,16 @@ from tradstrat.data import (
     read_price_csv,
 )
 from tradstrat.engine import BacktestConfig, BacktestResult, run_backtest
-from tradstrat.glossary import GLOSSARY
+from tradstrat.glossary import GLOSSARY, annotate
+from tradstrat.guide import GUIDES
 from tradstrat.metrics import calendar_year_returns, rolling_sharpe
 from tradstrat.reporting import (
     METRIC_LABELS,
     Verdict,
     assess,
+    assess_search,
     comparison_table,
     format_metric,
-    overfitting_verdict,
-    probability_verdict,
 )
 from tradstrat.stats import BootstrapResult, bootstrap, probabilistic_sharpe_ratio
 from tradstrat.strategies import STRATEGIES, create_strategy, indicator_overlays
@@ -67,34 +68,62 @@ from tradstrat.validation import (
     walk_forward,
 )
 
+REPOSITORY: Final[str] = "https://github.com/Elarionitis/TradStrat"
 STRATEGY_KEYS: Final[list[str]] = [key for key in STRATEGIES if key != "buy_and_hold"]
-QUICK_TICKERS: Final[list[str]] = ["SPY", "QQQ", "AAPL", "NVDA", "BTC-USD", "GLD", "TLT"]
+QUICK_TICKERS: Final[list[str]] = ["SPY", "QQQ", "AAPL", "NVDA", "BTC-USD", "GLD"]
 PERIODS: Final[dict[str, int | None]] = {"1Y": 1, "3Y": 3, "5Y": 5, "10Y": 10, "20Y": 20, "Max": None}
-SOURCES: Final[list[str]] = ["Yahoo", "CSV", "Sample"]
+SOURCES: Final[dict[str, str]] = {"Yahoo": "Ticker", "CSV": "CSV file", "Sample": "Demo"}
 EARLIEST: Final[pd.Timestamp] = pd.Timestamp("1970-01-01")
 CASH_OPTIONS: Final[list[str]] = ["Treasury bills", "Fixed rate", "None"]
-TONE_STYLES: Final[dict[str, dict[str, str]]] = {
+TRAIN_WINDOWS: Final[dict[str, int]] = {
+    "6 months": 126,
+    "1 year": 252,
+    "2 years": 504,
+    "3 years": 756,
+    "5 years": 1260,
+}
+TEST_WINDOWS: Final[dict[str, int]] = {"3 months": 63, "6 months": 126, "1 year": 252, "2 years": 504}
+TABS: Final[list[str]] = ["Results", "Trades", "Tune", "Compare", "Guide"]
+TONE_MARKS: Final[dict[str, str]] = {"good": "✓", "warning": "!", "bad": "✕", "neutral": "•"}
+PALETTE: Final[dict[str, dict[str, str]]] = {
     "light": {
-        "good": "#006300|#e7f4e7",
-        "warning": "#8a5a00|#fdf3dc",
-        "bad": "#b42b2b|#fbe9e9",
-        "neutral": "#52514e|#f0efec",
+        "good": "#006300",
+        "good-wash": "#e9f4e7",
+        "warning": "#8a5a00",
+        "warning-wash": "#fdf4de",
+        "bad": "#b42b2b",
+        "bad-wash": "#fbeaea",
+        "neutral": "#52514e",
+        "neutral-wash": "#f0efec",
         "ink": "#0b0b0b",
-        "secondary": "#52514e",
+        "muted": "#5f5e5a",
         "border": "#e1e0d9",
+        "surface": "#ffffff",
+        "accent": "#2a78d6",
+        "tip": "#1f1f1d",
+        "tip-ink": "#f7f6f2",
     },
     "dark": {
-        "good": "#0ca30c|#122612",
-        "warning": "#fab219|#2b2210",
-        "bad": "#e66767|#2e1616",
-        "neutral": "#c3c2b7|#1f1f1d",
+        "good": "#3fbf3f",
+        "good-wash": "#132613",
+        "warning": "#fab219",
+        "warning-wash": "#2b2210",
+        "bad": "#ee7a7a",
+        "bad-wash": "#2e1717",
+        "neutral": "#c3c2b7",
+        "neutral-wash": "#1f1f1d",
         "ink": "#f0efec",
-        "secondary": "#c3c2b7",
+        "muted": "#a8a79f",
         "border": "#2c2c2a",
+        "surface": "#171716",
+        "accent": "#3987e5",
+        "tip": "#f0efec",
+        "tip-ink": "#141413",
     },
 }
-TONE_ICONS: Final[dict[str, str]] = {"good": "✓", "warning": "!", "bad": "✕", "neutral": "•"}
-LOGO: Final[str] = base64.b64encode((Path(__file__).parent / "assets" / "logo.svg").read_bytes()).decode()
+ASSETS: Final[Path] = Path(__file__).parent / "assets"
+LOGO: Final[str] = base64.b64encode((ASSETS / "logo.svg").read_bytes()).decode()
+STYLESHEET: Final[str] = (ASSETS / "dashboard.css").read_text()
 
 
 @dataclass(frozen=True)
@@ -141,7 +170,7 @@ def cached_upload(contents: bytes, name: str) -> pd.DataFrame:
     return adjust_for_dividends(read_price_csv(io.BytesIO(contents), name))
 
 
-@st.cache_data(show_spinner="Resampling returns...")
+@st.cache_data(show_spinner="Checking how much of the result could be luck...")
 def cached_bootstrap(returns: pd.Series, benchmark: pd.Series) -> BootstrapResult:
     return bootstrap(returns, benchmark)
 
@@ -173,6 +202,71 @@ def load_prices(inputs: Inputs) -> tuple[pd.DataFrame, str | None]:
                 "Treasury bill yields could not be fetched, so idle cash earns nothing in this run.",
             )
     return prices, None
+
+
+# Styling. Streamlit has no component for a definition tooltip or a verdict card, so these few classes
+# are injected once and reused by every block of text on the page.
+
+
+def inject_styles(theme: ChartTheme) -> None:
+    colors = PALETTE[theme.name]
+    names = ("ink", "muted", "border", "surface", "accent", "tip", "tip-ink")
+    variables = "".join(f"--ts-{name}:{colors[name]};" for name in names)
+    tones = "".join(
+        f".ts-tone-{tone}{{--tone:{colors[tone]};--wash:{colors[tone + '-wash']};}}"
+        for tone in ("good", "warning", "bad", "neutral")
+    )
+    st.html(f"<style>:root{{{variables}}}{tones}{STYLESHEET}</style>")
+
+
+def rich(text: str, seen: set[str] | None = None) -> str:
+    """Explain glossary terms on hover, and turn **bold** markers into bold text."""
+    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", annotate(text, seen))
+
+
+def prose(text: str, seen: set[str] | None = None, *, muted: bool = False) -> None:
+    """A paragraph whose jargon explains itself on hover."""
+    css = "ts ts-muted" if muted else "ts"
+    st.html(f'<div class="{css}">{rich(text, seen)}</div>')
+
+
+def section(title: str, intro: str | None = None) -> None:
+    body = f'<div class="ts-muted">{rich(intro)}</div>' if intro else ""
+    st.html(f'<div class="ts"><div class="ts-section-title">{html.escape(title)}</div>{body}</div>')
+
+
+def chart(figure: Any) -> None:
+    st.plotly_chart(figure, theme=None, config={"displaylogo": False})
+
+
+def render_verdict(verdict: Verdict, seen: set[str] | None = None) -> None:
+    """A headline in the verdict's tone, followed by the findings behind it."""
+    seen = set() if seen is None else seen
+    findings = "".join(
+        f'<div class="ts-finding ts-tone-{finding.tone}">'
+        f'<span class="ts-mark">{TONE_MARKS[finding.tone]}</span>'
+        f"<span><strong>{html.escape(finding.title)}.</strong> {rich(finding.detail, seen)}</span></div>"
+        for finding in verdict.findings
+        if finding.tone != "neutral"
+    )
+    # Neutral findings are context rather than a pass or a fail, so they sit under the grid as a note.
+    notes = " ".join(
+        f"<strong>{html.escape(finding.title)}.</strong> {rich(finding.detail, seen)}"
+        for finding in verdict.findings
+        if finding.tone == "neutral"
+    )
+    if notes:
+        findings += f'<div class="ts-muted ts-small ts-note">{notes}</div>'
+    st.html(
+        f"""<div class="ts ts-tone-{verdict.tone}">
+  <div class="ts-verdict">
+    <div class="ts-badge">{TONE_MARKS[verdict.tone]}</div>
+    <div><div class="ts-headline">{html.escape(verdict.headline)}</div>
+      <div class="ts-muted">{rich(verdict.summary, seen)}</div></div>
+  </div>
+  <div class="ts-findings">{findings}</div>
+</div>"""
+    )
 
 
 # Sidebar.
@@ -207,18 +301,26 @@ def param_widget(strategy_key: str, spec: Any) -> float:
 def read_sidebar() -> Inputs:
     today = pd.Timestamp.today().normalize()
     with st.sidebar:
-        st.markdown("### Market data")
+        st.subheader("Market")
         source = st.segmented_control(
-            "Source", SOURCES, default="Yahoo", key="source", required=True, width="stretch"
+            "Data source",
+            list(SOURCES),
+            format_func=SOURCES.__getitem__,
+            default="Yahoo",
+            key="source",
+            required=True,
+            width="stretch",
+            label_visibility="collapsed",
         )
-        ticker, start, end, upload, label = "", today, today, None, "Sample data"
+        ticker, start, end, upload, label = "", today, today, None, "Demo data"
         if source == "Yahoo":
             st.session_state.setdefault("ticker", "SPY")
             ticker = st.text_input(
                 "Ticker",
                 key="ticker",
                 on_change=_typed_ticker,
-                help="Any Yahoo Finance symbol: stocks, ETFs, indices (^GSPC), BTC-USD.",
+                placeholder="e.g. SPY, AAPL, BTC-USD",
+                help=GLOSSARY["Ticker"] + " Any symbol on Yahoo Finance works, including indices like ^GSPC.",
             )
             st.pills(
                 "Popular",
@@ -227,9 +329,9 @@ def read_sidebar() -> Inputs:
                 on_change=_pick_ticker,
                 label_visibility="collapsed",
             )
-            period = st.select_slider("Period", list(PERIODS), value="10Y")
+            period = st.select_slider("History", list(PERIODS), value="10Y")
             years = PERIODS[period]
-            if st.toggle("Custom dates", key="custom_dates"):
+            if st.toggle("Pick exact dates", key="custom_dates"):
                 left, right = st.columns(2)
                 start = pd.Timestamp(left.date_input("Start", value=today - pd.DateOffset(years=10)))
                 end = pd.Timestamp(right.date_input("End", value=today))
@@ -246,50 +348,61 @@ def read_sidebar() -> Inputs:
             label = upload.name if upload else "your file"
         else:
             st.caption(
-                "A simulated market that needs no internet. Its results say nothing about real markets."
+                "A simulated market for trying the app offline. Its results say nothing about real ones."
             )
 
-        st.markdown("### Strategy")
+        st.subheader("Strategy")
         strategy_key = st.selectbox(
             "Strategy",
             STRATEGY_KEYS,
             format_func=lambda key: STRATEGIES[key].label,
             label_visibility="collapsed",
         )
-        st.caption(STRATEGIES[strategy_key].description)
+        st.caption(GUIDES[strategy_key].summary)
+        if st.button("How this strategy works", type="tertiary", icon=":material/menu_book:"):
+            strategy_dialog(strategy_key)
         params = {spec.name: param_widget(strategy_key, spec) for spec in STRATEGIES[strategy_key].params}
 
-        st.markdown("### Costs and risk")
-        with st.expander("Capital and trading costs", expanded=False):
+        st.space("small")
+        with st.expander("Advanced settings"):
+            st.caption("The defaults are realistic for a low-cost US broker.")
             capital = st.number_input("Starting capital ($)", min_value=1_000.0, value=10_000.0, step=1_000.0)
             commission_bps = st.number_input(
-                "Commission (bps per side)",
+                "Commission (bps)",
                 min_value=0.0,
                 max_value=100.0,
                 value=10.0,
                 step=1.0,
-                help=GLOSSARY["Commission"],
+                help=GLOSSARY["Commission"] + " " + GLOSSARY["Basis Point"],
             )
             slippage_bps = st.number_input(
-                "Slippage (bps per fill)",
+                "Slippage (bps)",
                 min_value=0.0,
                 max_value=100.0,
                 value=5.0,
                 step=1.0,
-                help=GLOSSARY["Slippage"],
+                help=GLOSSARY["Slippage"] + " " + GLOSSARY["Basis Point"],
             )
-        with st.expander("Position sizing and stops", expanded=False):
             position_fraction = st.slider(
-                "Share of equity per trade", 0.1, 1.0, 1.0, 0.1, help=GLOSSARY["Position Sizing"]
+                "Share of portfolio per trade",
+                10,
+                100,
+                100,
+                10,
+                format="%d%%",
+                help=GLOSSARY["Position Sizing"],
             )
             use_stop = st.toggle("Stop loss", help=GLOSSARY["Stop Loss"])
             stop_loss, trailing = None, False
             if use_stop:
-                stop_loss = st.slider("Stop distance", 0.01, 0.50, 0.10, 0.01)
+                stop_loss = st.slider("Sell after a fall of", 1, 50, 10, 1, format="%d%%") / 100
                 trailing = st.toggle("Trail the stop", help=GLOSSARY["Trailing Stop"])
             use_target = st.toggle("Volatility targeting", help=GLOSSARY["Volatility Targeting"])
-            target = st.slider("Annual volatility target", 0.05, 0.50, 0.15, 0.01) if use_target else None
-        with st.expander("Idle cash", expanded=False):
+            target = (
+                st.slider("Target yearly volatility", 5, 50, 15, 1, format="%d%%") / 100
+                if use_target
+                else None
+            )
             cash = st.radio(
                 "Uninvested cash earns",
                 CASH_OPTIONS,
@@ -299,17 +412,13 @@ def read_sidebar() -> Inputs:
             fixed_rate = 0.0
             if cash == "Fixed rate":
                 fixed_rate = st.number_input("Annual rate (%)", 0.0, 20.0, 4.0, 0.25) / 100
-            if cash == "Treasury bills" and source != "Yahoo":
-                st.caption("Uses real US Treasury bill yields for the dates in your data.")
-
-        st.caption(f"TradStrat {__version__} · For research and education. Not investment advice.")
 
     try:
         config = BacktestConfig(
             initial_capital=capital,
             commission_rate=commission_bps / 10_000,
             slippage_bps=slippage_bps,
-            position_fraction=position_fraction,
+            position_fraction=position_fraction / 100,
             stop_loss=stop_loss,
             trailing_stop=trailing,
             target_volatility=target,
@@ -333,52 +442,127 @@ def read_sidebar() -> Inputs:
     )
 
 
-# Shared pieces.
+# Explanations.
 
 
-def chart(figure: Any) -> None:
-    st.plotly_chart(figure, theme=None, config={"displaylogo": False})
-
-
-def callout(tone: str, text: str, icon: str) -> None:
-    """A message box whose color matches its meaning, so bad news never looks like a neutral note."""
-    box = {"good": st.success, "warning": st.warning, "bad": st.error}.get(tone, st.info)
-    box(text, icon=icon)
-
-
-def tone_colors(theme: ChartTheme, tone: str) -> tuple[str, str]:
-    foreground, background = TONE_STYLES[theme.name][tone].split("|")
-    return foreground, background
-
-
-def render_verdict(verdict: Verdict, theme: ChartTheme) -> None:
-    """A headline card in the verdict's tone, followed by the findings behind it."""
-    styles = TONE_STYLES[theme.name]
-    color, wash = tone_colors(theme, verdict.tone)
-    findings = "".join(
-        f'<div style="display:flex;gap:10px;align-items:flex-start;">'
-        f'<span style="color:{tone_colors(theme, finding.tone)[0]};font-weight:700;width:16px;'
-        f'text-align:center;flex:none;">{TONE_ICONS[finding.tone]}</span>'
-        f'<span style="color:{styles["secondary"]};"><strong style="color:{styles["ink"]};">'
-        f"{html.escape(finding.title)}.</strong> {html.escape(finding.detail)}</span></div>"
-        for finding in verdict.findings
+def guide_html(key: str) -> str:
+    """Everything a newcomer needs to understand one strategy, as a block of HTML."""
+    guide = GUIDES[key]
+    seen: set[str] = set()
+    settings = "".join(
+        f"<li><strong>{html.escape(spec.label)}</strong> (default {spec.default}). "
+        f"{rich(spec.help, seen)}</li>"
+        for spec in STRATEGIES[key].params
     )
+    settings_block = f'<div class="ts-label">Settings</div><ul>{settings}</ul>' if settings else ""
+    cells = (
+        ("Buys when", guide.buys),
+        ("Sells when", guide.sells),
+        ("Tends to work in", guide.works_when),
+        ("Tends to struggle in", guide.struggles_when),
+    )
+    grid = "".join(
+        f'<div><div class="ts-label">{label}</div>{rich(text, seen)}</div>' for label, text in cells
+    )
+    return f"""<div class="ts">
+  <span class="ts-chip ts-tone-neutral">{html.escape(guide.style)}</span>
+  <p><strong>{rich(guide.summary, seen)}</strong></p>
+  <p class="ts-muted">{rich(guide.idea, seen)}</p>
+  <div class="ts-grid2">{grid}</div>
+  {settings_block}
+</div>"""
+
+
+@st.dialog("How this strategy works", width="large")
+def strategy_dialog(key: str) -> None:
+    st.subheader(STRATEGIES[key].label)
+    st.html(guide_html(key))
+    st.caption("The Trades tab draws every buy and sell this strategy made on the price chart.")
+
+
+def render_header() -> None:
     st.html(
-        f"""
-<div style="font-family:Inter,system-ui,sans-serif;">
-  <div style="display:flex;gap:14px;align-items:center;padding:16px 18px;border-radius:12px;
-      background:{wash};border:1px solid {styles["border"]};">
-    <div style="flex:none;width:34px;height:34px;border-radius:50%;background:{color};color:#fff;
-        display:grid;place-items:center;font-weight:700;font-size:16px;">{TONE_ICONS[verdict.tone]}</div>
-    <div>
-      <div style="font-size:18px;font-weight:600;color:{styles["ink"]};">{html.escape(verdict.headline)}</div>
-      <div style="color:{styles["secondary"]};font-size:14px;">{html.escape(verdict.summary)}</div>
-    </div>
-  </div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px 22px;
-      margin-top:12px;font-size:14px;line-height:1.5;">{findings}</div>
+        f"""<div class="ts"><div class="ts-header">
+  <img src="data:image/svg+xml;base64,{LOGO}" width="36" height="36" alt="">
+  <div><h1>TradStrat</h1>
+  <div class="ts-tagline">Test a trading idea on past prices, then find out whether to believe it.</div></div>
+</div></div>"""
+    )
+
+
+def _hide_welcome() -> None:
+    st.session_state["welcome_hidden"] = True
+
+
+def render_welcome() -> None:
+    """A short orientation for first-time visitors, dismissed for the rest of the session."""
+    if st.session_state.get("welcome_hidden"):
+        return
+    steps = [
+        ("Pick a market.", "Type a ticker in the sidebar, or tap one of the popular ones."),
+        (
+            "Pick a strategy.",
+            "Each is a simple rule for when to buy and when to sell. **How this strategy works** "
+            "explains it in plain English.",
+        ),
+        (
+            "Read the verdict.",
+            "It says whether the rule beat simply buying and holding, and whether that could be luck.",
+        ),
+    ]
+    items = "".join(
+        f'<div class="ts-step"><span class="ts-step-number">{number}</span>'
+        f"<span><strong>{title}</strong> {rich(text)}</span></div>"
+        for number, (title, text) in enumerate(steps, start=1)
+    )
+    with st.container(border=True):
+        st.html(
+            f"""<div class="ts">
+  <div class="ts-section-title" style="margin-top:0">New to backtesting?</div>
+  <div class="ts-muted">TradStrat replays a trading rule on real past prices, as if you had followed it, with
+  realistic trading costs.</div>
+  <div class="ts-steps">{items}</div>
+  <div class="ts-muted ts-small">Words with a dotted underline, like {rich("Sharpe ratio")}, explain
+  themselves when you hover over or tap them.</div>
+</div>"""
+        )
+        st.button("Got it", on_click=_hide_welcome, key="welcome_dismiss")
+
+
+def render_context(prices: pd.DataFrame, inputs: Inputs, warning: str | None) -> None:
+    """The rule being tested, in one sentence, and the conditions it was tested under."""
+    seen: set[str] = set()
+    config = inputs.config
+    assert config is not None
+    rule = GUIDES[inputs.strategy_key].describe_rule(inputs.label, inputs.params)
+    cash = {
+        "Treasury bills": "idle cash earns Treasury bill yields",
+        "Fixed rate": f"idle cash earns {inputs.fixed_rate:.2%} a year",
+        "None": "idle cash earns nothing",
+    }[inputs.cash]
+    if warning:
+        cash = "idle cash earns nothing"
+    details = [
+        f"{prices.index[0]:%d %b %Y} to {prices.index[-1]:%d %b %Y}",
+        f"${config.initial_capital:,.0f} to start",
+        f"{config.commission_rate:.2%} commission and {config.slippage_bps / 10_000:.2%} slippage per trade",
+        cash,
+    ]
+    if config.stop_loss:
+        details.append(f"{'trailing' if config.trailing_stop else 'fixed'} stop {config.stop_loss:.0%} below")
+    meta = " · ".join(rich(detail, seen) for detail in details)
+    st.html(
+        f"""<div class="ts ts-card">
+  <div class="ts-eyebrow">The rule being tested</div>
+  <div class="ts-rule">{rich(rule, seen)}</div>
+  <div class="ts-meta">{meta}</div>
 </div>"""
     )
+    if warning:
+        st.warning(warning)
+
+
+# Tabs.
 
 
 def _points(value: float, benchmark: float, percent: bool = True) -> str | None:
@@ -392,9 +576,23 @@ def _points(value: float, benchmark: float, percent: bool = True) -> str | None:
     return f"{difference:+.{digits}f}{' pts' if percent else ''}"
 
 
-def _weekly(series: pd.Series) -> list[float]:
+def _thin(series: pd.Series) -> list[float]:
     """Thin a daily series for a sparkline, which only needs its shape."""
     return series.dropna().iloc[:: max(1, len(series) // 120)].round(4).tolist()
+
+
+def _metric(column: Any, label: str, value: str, delta: str | None = None, **kwargs: Any) -> None:
+    """A bordered metric whose gap to buy and hold is gray when there is no gap."""
+    flat = delta is not None and not delta.startswith(("+", "-"))
+    column.metric(
+        label,
+        value,
+        delta,
+        delta_description="vs buy & hold" if delta else None,
+        delta_color="off" if flat else "normal",
+        border=True,
+        **kwargs,
+    )
 
 
 def render_kpis(result: BacktestResult) -> None:
@@ -406,8 +604,9 @@ def render_kpis(result: BacktestResult) -> None:
             "Total return",
             format_metric("total_return", strategy.total_return),
             _points(strategy.total_return, benchmark.total_return),
-            _weekly(results["Strategy Equity"]),
+            _thin(results["Strategy Equity"]),
             "area",
+            GLOSSARY["Total Return"],
         ),
         (
             "Annual return",
@@ -415,58 +614,32 @@ def render_kpis(result: BacktestResult) -> None:
             _points(strategy.cagr, benchmark.cagr),
             years.round(4).tolist(),
             "bar",
+            GLOSSARY["CAGR"],
         ),
         (
             "Sharpe ratio",
             format_metric("sharpe_ratio", strategy.sharpe_ratio),
             _points(strategy.sharpe_ratio, benchmark.sharpe_ratio, percent=False),
-            _weekly(rolling_sharpe(result.excess_returns)),
+            _thin(rolling_sharpe(result.excess_returns)),
             "line",
+            GLOSSARY["Sharpe Ratio"],
         ),
         (
             "Max drawdown",
             format_metric("max_drawdown", strategy.max_drawdown),
             _points(strategy.max_drawdown, benchmark.max_drawdown),
-            _weekly(results["Strategy Drawdown"]),
+            _thin(results["Strategy Drawdown"]),
             "area",
+            GLOSSARY["Max Drawdown"],
         ),
     ]
-    for column, (label, value, delta, sparkline, kind) in zip(st.columns(4), tiles, strict=True):
-        column.metric(
-            label,
-            value,
-            delta,
-            delta_description="vs B&H" if delta else None,
-            delta_color="off" if delta and not delta.startswith(("+", "-")) else "normal",
-            border=True,
-            chart_data=sparkline or None,
-            chart_type=kind,
-            help=GLOSSARY.get({"Annual return": "CAGR"}.get(label, label.title()), None),
-        )
+    for column, (label, value, delta, sparkline, kind, explanation) in zip(st.columns(4), tiles, strict=True):
+        _metric(column, label, value, delta, chart_data=sparkline or None, chart_type=kind, help=explanation)
 
 
-def dataset_caption(prices: pd.DataFrame, inputs: Inputs, warning: str | None) -> None:
-    cash = {
-        "Treasury bills": "idle cash earns Treasury bill yields",
-        "Fixed rate": f"idle cash earns {inputs.fixed_rate:.2%}",
-        "None": "idle cash earns nothing",
-    }[inputs.cash]
-    if warning:
-        cash = "idle cash earns nothing"
-    st.caption(
-        f"**{html.escape(inputs.label)}** · {prices.index[0]:%d %b %Y} to {prices.index[-1]:%d %b %Y} · "
-        f"{len(prices):,} bars · {STRATEGIES[inputs.strategy_key].label} · {cash}"
-    )
-    if warning:
-        st.warning(warning, icon=":material/cloud_off:")
-
-
-# Tabs.
-
-
-def render_overview(result: BacktestResult, estimate: BootstrapResult | None, theme: ChartTheme) -> None:
+def render_results(result: BacktestResult, estimate: BootstrapResult | None, theme: ChartTheme) -> None:
     probability = estimate.probability_beats_benchmark if estimate else float("nan")
-    render_verdict(assess(result.metrics, result.benchmark_metrics, probability), theme)
+    render_verdict(assess(result.metrics, result.benchmark_metrics, probability))
     st.space("small")
     render_kpis(result)
 
@@ -482,43 +655,97 @@ def render_overview(result: BacktestResult, estimate: BootstrapResult | None, th
         chart(drawdown_figure(results["Strategy Drawdown"], results["Benchmark Drawdown"], theme))
     with right:
         chart(annual_returns_figure(results["Strategy Equity"], results["Buy and Hold Benchmark"], theme))
-    left, right = st.columns(2)
-    with left:
-        chart(rolling_sharpe_figure(result.excess_returns, result.benchmark_excess_returns, theme))
-    with right:
-        chart(monthly_returns_figure(results["Strategy Equity"], theme))
 
-    left, right = st.columns([3, 2])
-    with left:
-        st.subheader("All metrics")
-        st.dataframe(
-            comparison_table(result.metrics, result.benchmark_metrics),
-            height="content",
-            column_config={"_index": st.column_config.Column(width="medium")},
-        )
-    with right:
-        st.subheader("Against the benchmark")
-        relative = result.relative_metrics
-        grid = st.columns(2)
-        grid[0].metric(
-            "Alpha (annual)", format_metric("cagr", relative.alpha), help=GLOSSARY["Alpha"], border=True
-        )
-        grid[1].metric("Beta", f"{relative.beta:.2f}", help=GLOSSARY["Beta"], border=True)
-        grid = st.columns(2)
-        grid[0].metric("Correlation", f"{relative.correlation:.2f}", border=True)
-        grid[1].metric(
-            "Information ratio",
-            format_metric("sharpe_ratio", relative.information_ratio),
-            help=GLOSSARY["Information Ratio"],
-            border=True,
-        )
-        interest = float(result.results["Interest"].sum())
-        st.metric(
-            "Interest earned on idle cash", f"${interest:,.2f}", help=GLOSSARY["Cash Yield"], border=True
-        )
+    render_luck(result, estimate, theme)
+
+    with st.expander("All metrics and more charts"):
+        left, right = st.columns([3, 2], gap="large")
+        with left:
+            st.dataframe(
+                comparison_table(result.metrics, result.benchmark_metrics),
+                height="content",
+                column_config={"_index": st.column_config.Column(width="medium")},
+            )
+        with right:
+            relative = result.relative_metrics
+            grid = st.columns(2)
+            grid[0].metric(
+                "Alpha (annual)", format_metric("cagr", relative.alpha), help=GLOSSARY["Alpha"], border=True
+            )
+            grid[1].metric("Beta", f"{relative.beta:.2f}", help=GLOSSARY["Beta"], border=True)
+            grid = st.columns(2)
+            grid[0].metric(
+                "Correlation",
+                f"{relative.correlation:.2f}",
+                help="How closely daily returns move with buy and hold, from -1 to 1.",
+                border=True,
+            )
+            grid[1].metric(
+                "Information ratio",
+                format_metric("sharpe_ratio", relative.information_ratio),
+                help=GLOSSARY["Information Ratio"],
+                border=True,
+            )
+            interest = float(result.results["Interest"].sum())
+            st.metric(
+                "Interest earned on idle cash", f"${interest:,.2f}", help=GLOSSARY["Cash Yield"], border=True
+            )
+        left, right = st.columns(2)
+        with left:
+            chart(rolling_sharpe_figure(result.excess_returns, result.benchmark_excess_returns, theme))
+        with right:
+            chart(monthly_returns_figure(results["Strategy Equity"], theme))
+
+
+def render_luck(result: BacktestResult, estimate: BootstrapResult | None, theme: ChartTheme) -> None:
+    section(
+        "Could it be luck?",
+        "A backtest is one version of history. TradStrat reshuffles it in 20-day blocks 2,000 times, a "
+        "block bootstrap, to see how much the result could change by chance.",
+    )
+    if estimate is None:
+        st.caption("At least 40 trading days are needed to estimate this.")
+        return
+    returns = result.excess_returns
+    columns = st.columns(4)
+    columns[0].metric(
+        "Chance it beats buy & hold",
+        f"{estimate.probability_beats_benchmark:.0%}",
+        help="Share of reshuffled histories in which the strategy's Sharpe ratio was higher than buy and "
+        "hold's. A real edge should be 95% or more.",
+        border=True,
+    )
+    columns[1].metric(
+        "Chance it beats cash",
+        f"{probabilistic_sharpe_ratio(returns):.0%}",
+        help=GLOSSARY["Probabilistic Sharpe Ratio"],
+        border=True,
+    )
+    columns[2].metric(
+        "Likely Sharpe ratio",
+        f"{estimate.sharpe.low:.2f} to {estimate.sharpe.high:.2f}",
+        help="The 95% confidence interval. " + GLOSSARY["Confidence Interval"],
+        border=True,
+    )
+    columns[3].metric(
+        "Likely annual return",
+        f"{estimate.annual_return.low:.0%} to {estimate.annual_return.high:.0%}",
+        help="The 95% confidence interval for the annual return above cash.",
+        border=True,
+    )
+    std = returns.std(ddof=1)
+    observed = float(returns.mean() / std * np.sqrt(252)) if std > 0 else 0.0
+    chart(
+        bootstrap_figure(estimate.sharpe_samples, estimate.sharpe.low, estimate.sharpe.high, observed, theme)
+    )
 
 
 def render_trades(result: BacktestResult, prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> None:
+    prose(
+        "Every buy and sell the strategy made, drawn on the price together with the indicator lines it "
+        "watches. Trades fill at the next day's open, after commission and slippage.",
+        muted=True,
+    )
     strategy = create_strategy(inputs.strategy_key, **inputs.params)
     overlays = indicator_overlays(strategy, prices)
     index = result.results.index
@@ -534,13 +761,25 @@ def render_trades(result: BacktestResult, prices: pd.DataFrame, inputs: Inputs, 
     trades = result.trade_log
     metrics = result.metrics
     columns = st.columns(4)
-    columns[0].metric("Trades", metrics.number_of_trades, border=True)
-    columns[1].metric("Win rate", format_metric("win_rate", metrics.win_rate), border=True)
-    columns[2].metric("Profit factor", format_metric("profit_factor", metrics.profit_factor), border=True)
-    columns[3].metric("Average trade", format_metric("expectancy", metrics.expectancy), border=True)
+    columns[0].metric("Trades", metrics.number_of_trades, help=GLOSSARY["Number of Trades"], border=True)
+    columns[1].metric(
+        "Win rate", format_metric("win_rate", metrics.win_rate), help=GLOSSARY["Win Rate"], border=True
+    )
+    columns[2].metric(
+        "Profit factor",
+        format_metric("profit_factor", metrics.profit_factor),
+        help=GLOSSARY["Profit Factor"],
+        border=True,
+    )
+    columns[3].metric(
+        "Average trade",
+        format_metric("expectancy", metrics.expectancy),
+        help=GLOSSARY["Expectancy"],
+        border=True,
+    )
 
     if trades.empty:
-        st.info("No trades were made. Try a longer period or different parameters.", icon=":material/info:")
+        st.info("No trades were made. Try a longer history or different settings.")
         return
     st.dataframe(
         trades.assign(**{"Exit Reason": trades["Exit Reason"].str.replace("_", " ")}),
@@ -565,58 +804,30 @@ def render_trades(result: BacktestResult, prices: pd.DataFrame, inputs: Inputs, 
     )
 
 
-def render_robustness(result: BacktestResult, estimate: BootstrapResult | None, theme: ChartTheme) -> None:
-    st.markdown(
-        "A single backtest is one draw from what could have happened. Resampling its returns in 20-day "
-        "blocks shows how far the result could plausibly move by chance."
-    )
-    if estimate is None:
-        st.warning("At least 40 bars are needed to estimate confidence intervals.")
-        return
-    returns = result.excess_returns
-    columns = st.columns(4)
-    columns[0].metric(
-        "Sharpe, 95% interval",
-        f"{estimate.sharpe.low:.2f} to {estimate.sharpe.high:.2f}",
-        help=GLOSSARY["Block Bootstrap"],
-        border=True,
-    )
-    columns[1].metric(
-        "Annual return, 95% interval",
-        f"{estimate.annual_return.low:.1%} to {estimate.annual_return.high:.1%}",
-        border=True,
-    )
-    columns[2].metric(
-        "Probabilistic Sharpe",
-        f"{probabilistic_sharpe_ratio(returns):.1%}",
-        help=GLOSSARY["Probabilistic Sharpe Ratio"],
-        border=True,
-    )
-    columns[3].metric(
-        "Chance of beating buy and hold",
-        f"{estimate.probability_beats_benchmark:.1%}",
-        help="Share of resampled histories in which the strategy's Sharpe ratio beat buy and hold's.",
-        border=True,
-    )
-    observed = float(returns.mean() / returns.std(ddof=1) * np.sqrt(252)) if returns.std(ddof=1) > 0 else 0.0
-    chart(
-        bootstrap_figure(estimate.sharpe_samples, estimate.sharpe.low, estimate.sharpe.high, observed, theme)
-    )
+def _settings_text(key: str, params: dict[str, Any]) -> str:
+    labels = {spec.name: spec.label for spec in STRATEGIES[key].params}
+    return ", ".join(f"{labels[name]} {value}" for name, value in params.items())
 
 
-def render_optimize(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> None:
-    st.markdown(
-        "Search every parameter combination. The winner's score is **in-sample**, so it is flattered by "
-        "selection. Two corrections follow: the deflated Sharpe ratio adjusts for how many combinations were "
-        "tried, and the probability of backtest overfitting asks whether the winner would have stayed a "
-        "winner on data it was not chosen on."
+def render_search(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> None:
+    section(
+        "1. Find the best settings",
+        "Tries every combination of this strategy's settings on the whole history and picks the winner. "
+        "A winner picked in hindsight always looks good, so TradStrat also checks whether it is real or "
+        "just overfitting.",
     )
     left, right, button = st.columns([2, 2, 1], vertical_alignment="bottom")
-    points = left.slider("Grid points per parameter", 3, 10, 6)
-    objective = right.selectbox(
-        "Objective", OBJECTIVES, format_func=lambda name: name.replace("_", " ").title()
+    points = left.slider(
+        "Values to try per setting",
+        3,
+        10,
+        6,
+        help="More values give a finer search, and more chances to find a winner by luck.",
     )
-    if button.button("Run search", type="primary", width="stretch", icon=":material/search:"):
+    objective = right.selectbox(
+        "Pick the winner by", OBJECTIVES, format_func=lambda name: METRIC_LABELS.get(name, name)
+    )
+    if button.button("Run search", type="primary", width="stretch"):
         grid = build_grid(inputs.strategy_key, points)
         with st.spinner(f"Testing {len(grid)} combinations..."):
             st.session_state["search"] = (
@@ -626,65 +837,70 @@ def render_optimize(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> 
 
     stored = st.session_state.get("search")
     if stored is None or stored[0] != inputs.fingerprint():
-        st.info("Run a search to see how sensitive this strategy is to its settings.", icon=":material/tune:")
+        st.caption("Run a search to see how much the result depends on the settings.")
         return
     search = stored[1]
     parameters = [spec.name for spec in STRATEGIES[inputs.strategy_key].params]
     overfitting = search.overfitting.probability if search.overfitting else float("nan")
     columns = st.columns(4)
-    columns[0].metric("Combinations tested", len(search.table), border=True)
-    columns[1].metric("Best Sharpe (in-sample)", f"{search.table['sharpe_ratio'].max():.2f}", border=True)
+    columns[0].metric("Combinations tried", len(search.table), border=True)
+    columns[1].metric(
+        "Best Sharpe, in hindsight",
+        f"{search.table['sharpe_ratio'].max():.2f}",
+        help=GLOSSARY["In-Sample"],
+        border=True,
+    )
     columns[2].metric(
-        "Deflated Sharpe vs B&H",
-        f"{search.deflated_active_sharpe:.1%}",
-        help=GLOSSARY["Deflated Sharpe Ratio"],
+        "Chance the edge is real",
+        f"{search.deflated_active_sharpe:.0%}",
+        help="The deflated Sharpe ratio of the best settings against buy and hold. "
+        + GLOSSARY["Deflated Sharpe Ratio"],
         border=True,
     )
     columns[3].metric(
-        "Probability of overfitting",
+        "Chance it is overfit",
         "n/a" if math.isnan(overfitting) else f"{overfitting:.0%}",
         help=GLOSSARY["Probability of Backtest Overfitting"],
         border=True,
     )
-    luck_tone = "good" if search.deflated_active_sharpe >= 0.95 else "bad"
-    callout(
-        luck_tone,
-        f"**Selection luck.** {probability_verdict(search.deflated_active_sharpe)}",
-        ":material/casino:",
-    )
-    if math.isnan(overfitting):
-        overfit_tone = "neutral"
-    else:
-        overfit_tone = "good" if overfitting <= 0.1 else "bad" if overfitting >= 0.5 else "warning"
-    callout(overfit_tone, f"**Overfitting.** {overfitting_verdict(overfitting)}", ":material/model_training:")
-    st.caption(
-        f"Best parameters: {search.best_params}. Deflated Sharpe vs zero: {search.deflated_sharpe:.1%}."
+    render_verdict(assess_search(search.deflated_active_sharpe, overfitting))
+    prose(
+        f"**Best settings:** {_settings_text(inputs.strategy_key, search.best_params)}. Against cash rather "
+        f"than buy and hold, the chance the edge is real would be {search.deflated_sharpe:.0%}.",
+        muted=True,
     )
 
     left, right = st.columns(2)
     with left:
-        chart(search_figure(search.table, parameters, search.objective, theme))
+        labels = {spec.name: spec.label for spec in STRATEGIES[inputs.strategy_key].params}
+        chart(search_figure(search.table, parameters, search.objective, theme, labels))
     with right:
         if search.overfitting is not None:
             chart(overfitting_figure(search.overfitting.logits, theme))
-    st.dataframe(search.table.round(3), hide_index=True)
+    with st.expander("Every combination tried"):
+        st.dataframe(search.table.rename(columns=METRIC_LABELS).round(3), hide_index=True)
 
 
 def render_walk_forward(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> None:
-    st.markdown(
-        "**The fair test.** Parameters are chosen on one window and traded on the next, unseen window, then "
-        "the process rolls forward. The equity curve below is made only of decisions that could have been "
-        "taken at the time."
+    section(
+        "2. Test on unseen data",
+        "The fair test, called walk-forward validation. Settings are chosen on a training window, then "
+        "traded on the next window, which they have never seen. Everything rolls forward and repeats, so "
+        "the result only uses decisions that could have been made at the time.",
     )
-    columns = st.columns([1, 1, 1, 1, 1], vertical_alignment="bottom")
-    train_bars = columns[0].number_input("Training bars", 100, 2520, 756, 21)
-    test_bars = columns[1].number_input("Test bars", 21, 1260, 252, 21)
-    points = columns[2].slider("Grid points", 3, 8, 5)
-    anchored = columns[3].toggle("Anchored", help="Grow the training window instead of sliding it.")
-    if columns[4].button("Run walk-forward", type="primary", width="stretch", icon=":material/fast_forward:"):
+    columns = st.columns([2, 2, 1, 1], vertical_alignment="bottom")
+    train = columns[0].select_slider("Choose settings using", list(TRAIN_WINDOWS), value="3 years")
+    test = columns[1].select_slider("Then trade them for", list(TEST_WINDOWS), value="1 year")
+    with columns[2].popover("Options", width="stretch"):
+        points = st.slider("Values to try per setting", 3, 8, 5, key="walk_points")
+        anchored = st.toggle(
+            "Anchored",
+            help="Keep every past year in the training window instead of sliding it forward.",
+        )
+    if columns[3].button("Run walk-forward", type="primary", width="stretch"):
         grid = build_grid(inputs.strategy_key, points)
         try:
-            with st.spinner("Optimizing and testing each fold..."):
+            with st.spinner("Choosing settings and testing each window..."):
                 st.session_state["walk"] = (
                     inputs.fingerprint(),
                     walk_forward(
@@ -692,8 +908,8 @@ def render_walk_forward(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme)
                         inputs.strategy_key,
                         grid,
                         inputs.config,
-                        train_bars=int(train_bars),
-                        test_bars=int(test_bars),
+                        train_bars=TRAIN_WINDOWS[train],
+                        test_bars=TEST_WINDOWS[test],
                         anchored=anchored,
                     ),
                 )
@@ -703,100 +919,140 @@ def render_walk_forward(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme)
 
     stored = st.session_state.get("walk")
     if stored is None or stored[0] != inputs.fingerprint():
-        st.info(
-            "Run walk-forward to see how the strategy does on data it was not tuned on.",
-            icon=":material/timeline:",
-        )
+        st.caption("Run walk-forward to see how the strategy does on data it was not tuned on.")
         return
     result = stored[1]
+    metrics, benchmark = result.metrics, result.benchmark_metrics
     columns = st.columns(4)
-    columns[0].metric(
-        "Out-of-sample Sharpe",
-        format_metric("sharpe_ratio", result.metrics.sharpe_ratio),
-        _points(result.metrics.sharpe_ratio, result.benchmark_metrics.sharpe_ratio, percent=False),
-        delta_description="vs B&H",
-        border=True,
+    _metric(
+        columns[0],
+        "Sharpe on unseen data",
+        format_metric("sharpe_ratio", metrics.sharpe_ratio),
+        _points(metrics.sharpe_ratio, benchmark.sharpe_ratio, percent=False),
+        help=GLOSSARY["Sharpe Ratio"],
     )
-    columns[1].metric(
-        "Out-of-sample CAGR",
-        format_metric("cagr", result.metrics.cagr),
-        _points(result.metrics.cagr, result.benchmark_metrics.cagr),
-        delta_description="vs B&H",
-        border=True,
+    _metric(
+        columns[1],
+        "Annual return",
+        format_metric("cagr", metrics.cagr),
+        _points(metrics.cagr, benchmark.cagr),
+        help=GLOSSARY["CAGR"],
     )
-    columns[2].metric(
+    _metric(
+        columns[2],
         "Max drawdown",
-        format_metric("max_drawdown", result.metrics.max_drawdown),
-        _points(result.metrics.max_drawdown, result.benchmark_metrics.max_drawdown),
-        delta_description="vs B&H",
-        border=True,
+        format_metric("max_drawdown", metrics.max_drawdown),
+        _points(metrics.max_drawdown, benchmark.max_drawdown),
+        help=GLOSSARY["Max Drawdown"],
     )
     columns[3].metric(
-        "Efficiency",
-        format_metric("sharpe_ratio", result.efficiency),
+        "Kept of the hindsight score",
+        "n/a" if math.isnan(result.efficiency) else f"{result.efficiency:.0%}",
         help=GLOSSARY["Walk-Forward Efficiency"],
         border=True,
     )
-    chart(equity_figure(result.equity, result.benchmark, theme, "Out-of-sample growth"))
+    chart(equity_figure(result.equity, result.benchmark, theme, "Growth on unseen data"))
     chart(fold_scores_figure(result.folds, result.objective, theme))
-    folds = result.folds.assign(Parameters=result.folds["Parameters"].astype(str))
-    st.dataframe(
-        folds.round({"In-Sample Score": 3, "Out-of-Sample Score": 3, "Test Return": 4}),
-        hide_index=True,
-        column_config={
-            name: st.column_config.DateColumn(format="YYYY-MM-DD")
-            for name in ("Train Start", "Train End", "Test Start", "Test End")
-        }
-        | {"Test Return": st.column_config.NumberColumn(format="percent")},
-    )
+    with st.expander("Window by window"):
+        folds = result.folds.assign(Parameters=result.folds["Parameters"].astype(str))
+        st.dataframe(
+            folds.round({"In-Sample Score": 3, "Out-of-Sample Score": 3, "Test Return": 4}),
+            hide_index=True,
+            column_config={
+                name: st.column_config.DateColumn(format="YYYY-MM-DD")
+                for name in ("Train Start", "Train End", "Test Start", "Test End")
+            }
+            | {"Test Return": st.column_config.NumberColumn(format="percent")},
+        )
+
+
+def render_tune(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> None:
+    render_search(prices, inputs, theme)
+    st.divider()
+    render_walk_forward(prices, inputs, theme)
 
 
 def render_compare(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> None:
-    st.markdown(
-        "Every strategy at its default settings, on the same data and with the same costs. Nothing is tuned "
-        "here, so none of these numbers is flattered by a parameter search."
+    prose(
+        "Same data, same costs and no tuning, so nothing here is flattered by hindsight. Strategies that "
+        "sit in cash part of the time often fall less in a crash, and rise less in a boom.",
+        muted=True,
     )
     comparison = cached_comparison(prices, inputs.config)
     if comparison.table.empty:
         st.warning("This history is too short for any strategy's indicators.")
         return
     chart(comparison_figure(comparison.equity, theme))
+    styles = {cls.label: GUIDES[key].style for key, cls in STRATEGIES.items()}
     columns = ["Strategy", "cagr", "sharpe_ratio", "max_drawdown", "exposure", "number_of_trades"]
     table = comparison.table[columns].rename(columns=METRIC_LABELS)
+    table.insert(1, "Style", table["Strategy"].map(styles))
     st.dataframe(
         table,
         hide_index=True,
         column_config={
-            "CAGR": st.column_config.NumberColumn(format="percent"),
-            "Sharpe Ratio": st.column_config.NumberColumn(format="%.2f"),
-            "Max Drawdown": st.column_config.NumberColumn(format="percent"),
-            "Exposure": st.column_config.ProgressColumn(format="percent", min_value=0.0, max_value=1.0),
+            "CAGR": st.column_config.NumberColumn(format="percent", help=GLOSSARY["CAGR"]),
+            "Sharpe Ratio": st.column_config.NumberColumn(format="%.2f", help=GLOSSARY["Sharpe Ratio"]),
+            "Max Drawdown": st.column_config.NumberColumn(format="percent", help=GLOSSARY["Max Drawdown"]),
+            "Exposure": st.column_config.ProgressColumn(
+                format="percent", min_value=0.0, max_value=1.0, help=GLOSSARY["Exposure"]
+            ),
         },
     )
 
 
-def render_learn() -> None:
-    left, right = st.columns([2, 3], gap="large")
+def render_guide() -> None:
+    left, right = st.columns([3, 2], gap="large")
     with left:
-        st.subheader("How TradStrat tests an idea")
-        st.markdown(
-            """
-1. **Simulate honestly.** A signal formed at today's close trades at tomorrow's open, after commission
-   and slippage, in whole shares. Prices include dividends and idle cash earns Treasury bill yields.
-2. **Compare with doing nothing clever.** Buy and hold runs through the same simulator with the same costs.
-3. **Ask whether it was luck.** A block bootstrap puts intervals on every headline number.
-4. **Correct for searching.** The deflated Sharpe ratio and the probability of backtest overfitting
-   discount a winner picked from many trials.
-5. **Test on unseen data.** Walk-forward validation only ever trades parameters chosen on the past.
-"""
-        )
+        section("How TradStrat tests an idea")
+        steps = [
+            "**It trades the way you could have.** A signal formed at one day's close trades at the next "
+            "day's open, after commission and slippage, in whole shares. Prices include dividends and idle "
+            "cash earns Treasury bill yields.",
+            "**It compares with doing nothing clever.** Buy and hold runs through the same simulator with "
+            "the same costs. A strategy only counts if it beats that.",
+            "**It asks whether the result was luck.** A block bootstrap reshuffles history thousands of "
+            "times to show how much each number could have varied.",
+            "**It corrects for searching.** Try enough settings and one will look good. The deflated "
+            "Sharpe ratio and the probability of backtest overfitting discount for that.",
+            "**It tests on unseen data.** Walk-forward validation only ever trades settings chosen on the "
+            "past.",
+        ]
+        seen: set[str] = set()
+        items = "".join(f"<li>{rich(step, seen)}</li>" for step in steps)
+        st.html(f'<div class="ts"><ol>{items}</ol></div>')
+
+        section("The strategies", "Each one is a simple, well-known rule. Open one to see how it decides.")
+        for key in [*STRATEGY_KEYS, "buy_and_hold"]:
+            with st.expander(f"{STRATEGIES[key].label}  ·  {GUIDES[key].style}"):
+                st.html(guide_html(key))
     with right:
-        st.subheader("Glossary")
-        query = st.text_input("Search terms", placeholder="Try: Sharpe", label_visibility="collapsed")
+        section("Glossary")
+        query = st.text_input(
+            "Search terms", placeholder="Search, e.g. drawdown", label_visibility="collapsed"
+        )
         query = query.strip().lower()
-        for term, definition in sorted(GLOSSARY.items()):
-            if query in term.lower() or query in definition.lower():
-                st.markdown(f"**{term}.** {definition}")
+        matches = [
+            (term, definition)
+            for term, definition in sorted(GLOSSARY.items())
+            if query in term.lower() or query in definition.lower()
+        ]
+        if not matches:
+            st.caption("No terms match.")
+        entries = "".join(
+            f"<p><strong>{html.escape(term)}.</strong> "
+            f'<span class="ts-muted">{html.escape(definition)}</span></p>'
+            for term, definition in matches
+        )
+        st.html(f'<div class="ts ts-small">{entries}</div>')
+
+
+def render_footer() -> None:
+    st.html(
+        f"""<div class="ts ts-footer">TradStrat {__version__} · <a href="{REPOSITORY}" target="_blank"
+rel="noopener">Source on GitHub</a> · MIT license · For research and education, not investment advice.
+Past performance does not predict future results.</div>"""
+    )
 
 
 def report_builder(
@@ -819,26 +1075,16 @@ def report_builder(
     return build
 
 
-def render_header() -> None:
-    st.html(
-        f"""
-<div style="display:flex;align-items:center;gap:12px;margin-bottom:-6px;">
-  <img src="data:image/svg+xml;base64,{LOGO}" width="34" height="34" alt="">
-  <div style="font-family:Inter,system-ui,sans-serif;font-size:28px;font-weight:700;letter-spacing:-.02em;">
-    TradStrat</div>
-</div>"""
-    )
-    st.markdown("Backtest a trading idea, then find out whether to believe it.")
-
-
 def main() -> None:
     st.set_page_config(page_title="TradStrat", page_icon=":material/monitoring:", layout="wide")
     theme = theme_for(st.context.theme.type == "dark")
+    inject_styles(theme)
     inputs = read_sidebar()
 
-    header, actions = st.columns([4, 1], vertical_alignment="bottom")
+    header, actions = st.columns([4, 1], vertical_alignment="center")
     with header:
         render_header()
+    render_welcome()
 
     if inputs.config is None:
         st.error(inputs.config_error)
@@ -846,17 +1092,17 @@ def main() -> None:
     try:
         strategy = create_strategy(inputs.strategy_key, **inputs.params)
     except ValueError as error:
-        st.error(f"These parameters don't work together: {error}", icon=":material/tune:")
+        st.error(f"These settings don't work together: {error}")
         return
     try:
         prices, warning = load_prices(inputs)
     except DataError as error:
-        st.error(str(error), icon=":material/error:")
+        st.error(str(error))
         return
     if len(prices) <= strategy.warmup + 1:
         st.warning(
-            f"{STRATEGIES[inputs.strategy_key].label} needs more than {strategy.warmup} bars of history, "
-            f"but only {len(prices)} are available. Use a longer period or a shorter window."
+            f"{STRATEGIES[inputs.strategy_key].label} needs more than {strategy.warmup} trading days of "
+            f"history, but only {len(prices)} are available. Use a longer history or shorter windows."
         )
         return
 
@@ -872,37 +1118,25 @@ def main() -> None:
             report_builder(result, prices, inputs, estimate),
             file_name=f"tradstrat-{inputs.strategy_key}-{inputs.label.lower().replace(' ', '-')}.html",
             mime="text/html",
-            icon=":material/description:",
+            icon=":material/download:",
             on_click="ignore",
             width="stretch",
+            help="A single HTML file with the verdict, charts and every trade, to keep or share.",
         )
-    dataset_caption(prices, inputs, warning)
+    render_context(prices, inputs, warning)
 
-    tabs = st.tabs(
-        [
-            ":material/insights: Overview",
-            ":material/swap_vert: Trades",
-            ":material/verified: Robustness",
-            ":material/tune: Optimize",
-            ":material/fast_forward: Walk-forward",
-            ":material/leaderboard: Compare",
-            ":material/school: Learn",
-        ]
-    )
-    with tabs[0]:
-        render_overview(result, estimate, theme)
-    with tabs[1]:
+    results, trades, tune, compare, guide = st.tabs(TABS)
+    with results:
+        render_results(result, estimate, theme)
+    with trades:
         render_trades(result, prices, inputs, theme)
-    with tabs[2]:
-        render_robustness(result, estimate, theme)
-    with tabs[3]:
-        render_optimize(prices, inputs, theme)
-    with tabs[4]:
-        render_walk_forward(prices, inputs, theme)
-    with tabs[5]:
+    with tune:
+        render_tune(prices, inputs, theme)
+    with compare:
         render_compare(prices, inputs, theme)
-    with tabs[6]:
-        render_learn()
+    with guide:
+        render_guide()
+    render_footer()
 
 
 if __name__ == "__main__":
