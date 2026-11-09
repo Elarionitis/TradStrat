@@ -121,6 +121,12 @@ MUTATIONS = [
         "Dividend adjustment skips open, high and low",
     ),
     (
+        "data.py",
+        "start=max(pd.Timestamp(start), YFINANCE_EARLIEST)",
+        "start=pd.Timestamp(start)",
+        "All history quietly returns only the last month",
+    ),
+    (
         "stats.py",
         "first = NORMAL.inv_cdf(1 - 1 / trials)",
         "first = NORMAL.inv_cdf(1 - 1 / (2 * trials))",

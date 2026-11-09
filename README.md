@@ -249,7 +249,7 @@ tests target the mistakes that matter most:
 - **Published results:** the deflated Sharpe code reproduces the numerical example in Bailey and
   Lopez de Prado (2014). The overfitting estimate is checked against cases with known answers: about 50% for
   pure noise, and close to 0% for a configuration with a real edge.
-- **The tests themselves:** `scripts/mutation_check.py` injects 32 realistic bugs and confirms that the
+- **The tests themselves:** `scripts/mutation_check.py` injects 33 realistic bugs and confirms that the
   suite catches each one.
 
 ```bash
