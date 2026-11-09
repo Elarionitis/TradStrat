@@ -147,4 +147,5 @@ GUIDES: dict[str, StrategyGuide] = {
 
 def guide_for(strategy: type[Strategy]) -> StrategyGuide:
     """The written guide for a strategy, or a minimal one built from its own description."""
-    return GUIDES.get(strategy.key) or StrategyGuide(style="Custom", summary=strategy.description)
+    written = GUIDES.get(strategy.key) or getattr(strategy, "guide", None)
+    return written or StrategyGuide(style="Custom", summary=strategy.description)

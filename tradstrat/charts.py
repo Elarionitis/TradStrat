@@ -17,6 +17,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from tradstrat.metrics import calendar_year_returns, rolling_sharpe
+from tradstrat.rules import RuleStrategy
 from tradstrat.strategies import STRATEGIES, BuyAndHoldStrategy
 
 FONT_FAMILY: Final[str] = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif"
@@ -102,6 +103,8 @@ def strategy_color(label: str, theme: ChartTheme) -> str:
     """A fixed color per strategy, so a filter that hides one never repaints the others."""
     if label == BuyAndHoldStrategy.label:
         return theme.benchmark
+    if label == RuleStrategy.label:
+        return theme.ink  # The reader's own rule stands apart from every built-in one.
     labels = [cls.label for key, cls in STRATEGIES.items() if key != BuyAndHoldStrategy.key]
     position = labels.index(label) if label in labels else len(labels)
     return theme.series[position % len(theme.series)]
@@ -522,7 +525,7 @@ def comparison_figure(
                 equity[column],
                 column,
                 strategy_color(column, theme),
-                width=2.5 if column == BuyAndHoldStrategy.label else 1.75,
+                width=2.5 if column in (BuyAndHoldStrategy.label, RuleStrategy.label) else 1.75,
                 hovertemplate="$%{y:,.0f}",
             )
             for column in equity.columns

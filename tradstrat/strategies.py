@@ -73,15 +73,25 @@ def register(cls: StrategyType) -> StrategyType:
     return cls
 
 
-def create_strategy(key: str, **overrides: float) -> Strategy:
-    """Build a registered strategy, using declared defaults for any parameter not supplied."""
-    if key not in STRATEGIES:
-        raise ValueError(f"Unknown strategy {key!r}. Choose from: {', '.join(sorted(STRATEGIES))}.")
-    cls = STRATEGIES[key]
+StrategyRef = str | type[Strategy]
+
+
+def strategy_class(strategy: StrategyRef) -> type[Strategy]:
+    """Look up a registered strategy by key, or pass a strategy class, such as a custom rule, through."""
+    if not isinstance(strategy, str):
+        return strategy
+    if strategy not in STRATEGIES:
+        raise ValueError(f"Unknown strategy {strategy!r}. Choose from: {', '.join(sorted(STRATEGIES))}.")
+    return STRATEGIES[strategy]
+
+
+def create_strategy(strategy: StrategyRef, **overrides: float) -> Strategy:
+    """Build a strategy, using declared defaults for any parameter not supplied."""
+    cls = strategy_class(strategy)
     specs = {spec.name: spec for spec in cls.params}
     unknown = set(overrides) - set(specs)
     if unknown:
-        raise ValueError(f"Unknown parameters for {key}: {', '.join(sorted(unknown))}.")
+        raise ValueError(f"Unknown parameters for {cls.key}: {', '.join(sorted(unknown))}.")
 
     values: dict[str, Any] = {}
     for name, spec in specs.items():
@@ -361,3 +371,25 @@ def indicator_overlays(strategy: Strategy, data: pd.DataFrame) -> pd.DataFrame |
         return None
     signals = strategy.generate_signals(data)
     return pd.DataFrame({label: signals[column] for column, label in strategy.overlays}, index=data.index)
+
+
+@dataclass(frozen=True)
+class LatestSignal:
+    """What a strategy's rule said at the last close in the data.
+
+    ``since`` is the close at which the rule last changed its mind, or ``None`` if it said the same thing
+    for the whole history. Acting on a signal means trading at the next open, as the engine does.
+    """
+
+    long: bool
+    as_of: pd.Timestamp
+    since: pd.Timestamp | None
+
+
+def latest_signal(strategy: Strategy, data: pd.DataFrame) -> LatestSignal:
+    """Read the rule's position at the final bar, and when it last changed."""
+    signal = strategy.generate_signals(data)["signal"].fillna(0).astype(int)
+    current = int(signal.iloc[-1])
+    different = np.flatnonzero(signal.to_numpy() != current)
+    since = None if different.size == 0 else signal.index[different[-1] + 1]
+    return LatestSignal(long=current == 1, as_of=signal.index[-1], since=since)

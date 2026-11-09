@@ -164,3 +164,96 @@ def test_every_strategy_is_explained_in_the_guide(app: AppTest) -> None:
     for phrase in ("Buys when", "Sells when", "Tends to struggle in"):
         assert phrase in rendered
     assert len([item for item in app.expander if "·" in item.label]) == 6
+
+
+def rendered(app: AppTest) -> str:
+    return " ".join(str(element.proto) for element in app.get("html"))
+
+
+def test_the_benchmark_and_latest_signal_are_explained(app: AppTest) -> None:
+    text = rendered(app)
+
+    assert "buying Demo data on the first day and keeping it" in text
+    assert "Latest signal" in text
+    assert "Hold cash" in text or "Own Demo data" in text
+
+
+def test_a_custom_rule_runs_through_every_tab(app: AppTest) -> None:
+    app.sidebar.selectbox[0].set_value("custom").run()
+
+    assert not app.exception
+    assert not app.error
+    text = rendered(app)
+    assert "50-day average price crosses above its 200-day average price" in text
+    tables = [frame.value for frame in app.dataframe if "Style" in frame.value.columns]
+    assert "Your own rule" in tables[0]["Strategy"].tolist()
+
+
+def test_an_example_fills_in_the_rule(app: AppTest) -> None:
+    app.sidebar.selectbox[0].set_value("custom").run()
+    next(pills for pills in app.get("button_group") if "Dip in an uptrend" in str(pills.proto))
+    app.session_state["rule_example"] = "Dip in an uptrend"
+    app.session_state["rule_buy"] = "rsi(2) < 10 and close > sma(200)"
+    app.session_state["rule_sell"] = "rsi(2) > 70 or close < sma(200)"
+    app.run()
+
+    assert not app.exception
+    assert "is below 10 and its price is above its 200-day average price" in rendered(app)
+
+
+def test_an_unreadable_rule_shows_how_to_fix_it(app: AppTest) -> None:
+    app.sidebar.selectbox[0].set_value("custom").run()
+    app.sidebar.text_input(key="rule_buy").set_value("close above sma(20)").run()
+
+    assert not app.exception
+    assert any("Could not read" in item.value for item in app.error)
+    assert "What a rule can look at" in rendered(app)
+
+
+def test_a_custom_rule_can_be_tuned(app: AppTest) -> None:
+    app.sidebar.selectbox[0].set_value("custom").run()
+    app.tabs[2].slider[0].set_value(3)
+    button(app, "Run search").click().run()
+
+    assert not app.exception
+    assert "Chance it is overfit" in metric_labels(app)
+    assert "buy when sma(" in rendered(app)
+
+
+def test_a_shared_link_restores_the_test() -> None:
+    test = AppTest.from_file(APP, default_timeout=90)
+    test.query_params.update(
+        {"source": "Sample", "strategy": "custom", "buy": "close > sma(100)", "sell": ""}
+    )
+    test.run()
+
+    assert not test.exception
+    assert test.session_state["strategy"] == "custom"
+    assert "100-day average price" in rendered(test)
+
+
+def test_a_shared_link_ignores_invalid_values() -> None:
+    test = AppTest.from_file(APP, default_timeout=90)
+    test.query_params.update({"source": "Sample", "strategy": "rsi", "window": "9999", "history": "nope"})
+    test.run()
+
+    assert not test.exception
+    assert test.session_state["rsi.window"] == 14
+
+
+def test_the_link_follows_the_settings(app: AppTest) -> None:
+    app.sidebar.selectbox[0].set_value("rsi").run()
+
+    assert app.query_params["strategy"] == "rsi"
+    assert app.query_params["source"] == "Sample"
+
+
+def test_rule_text_from_a_link_cannot_inject_markdown() -> None:
+    test = AppTest.from_file(APP, default_timeout=90)
+    test.query_params.update({"source": "Sample", "strategy": "custom", "buy": "[x](http://example.com) > 3"})
+    test.run()
+
+    assert not test.exception
+    messages = [item.value for item in test.error]
+    assert messages
+    assert all("[x](http" not in message for message in messages)

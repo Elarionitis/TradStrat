@@ -27,14 +27,19 @@ fitting noise. Then it gives you the answer in plain English.
 
 - **Test any Yahoo Finance symbol or your own data.** Stocks, ETFs, indices, crypto, or any CSV export from a
   broker or exchange.
-- **Get a straight answer.** Every backtest opens with a verdict such as *"Beat buy and hold, but it could be
-  luck"*, and the reasons behind it.
+- **Test your own idea, without code.** Write a rule such as `rsi(2) < 10 and close > sma(200)` and it gets
+  the same checks as the built-in strategies, including tuning and walk-forward validation.
+- **Get a straight answer.** Every backtest opens with a verdict such as *"Beat just holding SPY, but it could
+  be luck"*, and the reasons behind it.
+- **See what the rule says today.** Whether it would own the asset or hold cash at the latest close, and since
+  when.
 - **Start without a finance background.** The dashboard states the rule being tested in one sentence, explains
   every strategy in plain English, and defines each piece of jargon when you hover over it.
 - **See how fragile a result is.** Bootstrap intervals, the probabilistic and deflated Sharpe ratios, and the
   probability of backtest overfitting.
 - **Tune without fooling yourself.** Walk-forward validation only ever trades parameters chosen on the past.
-- **Share it.** Download a self-contained HTML report with interactive charts and the full trade log.
+- **Share it.** The address bar always links to the exact test on screen, and a self-contained HTML report
+  holds the interactive charts and the full trade log.
 
 ## Quick Start
 
@@ -58,6 +63,7 @@ Or use the command line:
 
 ```bash
 tradstrat backtest --ticker SPY --strategy rsi --cash-rate tbill
+tradstrat backtest --ticker BTC-USD --buy "close > high(252)" --sell "close < low(50)"
 tradstrat report --ticker QQQ --strategy donchian --out reports/qqq.html
 tradstrat compare --ticker GLD
 tradstrat optimize --ticker SPY --strategy ma_crossover --points 6
@@ -120,13 +126,14 @@ The whole study is reproduced by `python scripts/run_research.py`.
 - Probability of backtest overfitting, by combinatorially symmetric cross-validation
 - Walk-forward optimization, in sliding or anchored mode
 
-**Five strategies, and room for yours**
+**Five strategies, and your own**
 - Moving average crossover, z-score mean reversion, RSI reversal, Donchian breakout, time-series momentum
+- A small rule language for testing an idea without writing code, whose every number can be tuned
 - A registry that gives a new strategy the dashboard, CLI, optimizer and look-ahead tests with no extra code
 
 **Three ways to use it**
-- A Streamlit dashboard with light and dark themes, a short welcome for first-time visitors, and definitions
-  on hover
+- A Streamlit dashboard with light and dark themes, a short welcome for first-time visitors, definitions
+  on hover, and links that reopen the exact test
 - A command-line interface
 - Self-contained HTML reports
 
@@ -140,6 +147,41 @@ The whole study is reproduced by `python scripts/run_research.py`.
 <td align="center"><sub>Walk-forward: what each fold's parameters promised, and what they delivered</sub></td>
 </tr>
 </table>
+
+## Write Your Own Rule
+
+Pick **Write your own rule** in the dashboard, or pass `--buy` and `--sell` on the command line. A rule
+compares two things with `>`, `<`, `crosses above` or `crosses below`, and joins comparisons with `and` or `or`.
+
+| Building block | Meaning |
+| --- | --- |
+| `close` | The closing price |
+| `sma(50)`, `ema(20)` | Simple or exponential moving average of the close |
+| `rsi(14)` | Wilder's Relative Strength Index, from 0 to 100 |
+| `high(252)`, `low(20)` | Highest high or lowest low of the previous days, not counting today |
+| `return(126)` | Percentage change over the period, so `return(126) > 0` means up over six months |
+| `zscore(20)` | Distance from the average in standard deviations |
+
+Some rules to start from:
+
+| Idea | Buy when | Sell when |
+| --- | --- | --- |
+| Golden cross | `sma(50) crosses above sma(200)` | `sma(50) crosses below sma(200)` |
+| Trend filter | `close > sma(200)` | empty: hold while the buy rule is true |
+| Dip in an uptrend | `rsi(2) < 10 and close > sma(200)` | `rsi(2) > 70 or close < sma(200)` |
+| 52-week high | `close > high(252)` | `close < low(50)` |
+
+Every number in a rule becomes a parameter, so the optimizer and walk-forward validation tune a custom rule
+exactly as they tune the built-in strategies. The same look-ahead tests cover rules, and the built-in
+strategies written as rules produce identical positions.
+
+## Where It Fits
+
+Charting platforms such as TradingView and Python libraries such as backtesting.py and vectorbt are built to
+run backtests quickly and at scale. Portfolio Visualizer is built around asset allocation. TradStrat is built
+around one question those tools leave to you: is this result real? It compares every result with simply holding
+the asset, and corrects for luck and for how many variations were tried. It also asks for no code and no
+finance background.
 
 ## Use Your Own Data
 
@@ -195,9 +237,10 @@ The formulas and design decisions are in [docs/METHODOLOGY.md](docs/METHODOLOGY.
 A backtester that is subtly wrong is worse than none, because it produces confident, wrong numbers. So the
 tests target the mistakes that matter most:
 
-- **Look-ahead bias:** a property-based test runs on every registered strategy and asserts that signals
-  computed on a truncated history match the full-history signals exactly. Other tests rewrite a bar's high,
-  low and close and assert that what was bought at its open, and where a trailing stop sat, do not change.
+- **Look-ahead bias:** a property-based test runs on every registered strategy and example rule, and asserts
+  that signals computed on a truncated history match the full-history signals exactly. Other tests rewrite a
+  bar's high, low and close and assert that what was bought at its open, and where a trailing stop sat, do not
+  change.
 - **Train/test leakage:** tests rewrite a fold's test window, and everything after it, and assert that the
   parameters chosen for that fold do not change.
 - **Accounting:** for arbitrary prices, signals, stops and cash rates, trade P&L plus interest must reconcile
@@ -205,7 +248,7 @@ tests target the mistakes that matter most:
 - **Published results:** the deflated Sharpe code reproduces the numerical example in Bailey and
   Lopez de Prado (2014). The overfitting estimate is checked against cases with known answers: about 50% for
   pure noise, and close to 0% for a configuration with a real edge.
-- **The tests themselves:** `scripts/mutation_check.py` injects 26 realistic bugs and confirms that the
+- **The tests themselves:** `scripts/mutation_check.py` injects 32 realistic bugs and confirms that the
   suite catches each one.
 
 ```bash
@@ -257,6 +300,7 @@ assets/                   Logo and dashboard stylesheet
 tradstrat/
     data.py               Loading, validation, dividend adjustment, cash rates and caching
     strategies.py         Strategy base class, registry and implementations
+    rules.py              The rule language for custom strategies
     engine.py             Event-driven simulator
     metrics.py            Return, risk and trade statistics
     stats.py              Deflated Sharpe, block bootstrap and probability of overfitting

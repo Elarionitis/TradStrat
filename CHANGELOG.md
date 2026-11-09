@@ -6,6 +6,12 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 
 ### Added
 
+- **Custom rules without code.** A small rule language, such as `close crosses above sma(200)`, in the
+  dashboard and through `--buy` and `--sell` on the command line. Every number in a rule can be tuned by the
+  optimizer and walk-forward validation, and custom rules appear in the strategy comparison.
+- **The latest signal.** The dashboard shows whether the rule would own the asset or hold cash at the latest
+  close, and since when.
+- **Shareable links.** The address bar holds the market, history and strategy, so a link reopens the same test.
 - **Interest on idle cash.** Uninvested cash can earn a fixed rate or the real 13-week US Treasury bill
   yield, accrued over calendar days at the rate known the evening before.
 - **Sharpe ratios on excess returns.** Sharpe, Sortino, alpha, the bootstrap and the deflated Sharpe ratio are
@@ -32,6 +38,8 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 - The dashboard was redesigned around five tabs: Results, Trades, Tune, Compare and Guide. It leads with the
   verdict, keeps advanced settings in one place, uses plain labels such as "Chance the edge is real", and its
   charts follow the light or dark theme.
+- Verdicts name the asset, as in "Just holding SPY did better", and the dashboard says what buy and hold
+  means next to the rule being tested.
 - Search and walk-forward results are cleared when any input changes, so they can never describe other
   settings.
 - The research study in `docs/RESULTS.md` now credits idle cash with Treasury bill yields and reports the

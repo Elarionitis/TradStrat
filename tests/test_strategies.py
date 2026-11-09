@@ -9,14 +9,17 @@ from conftest import make_bars, random_walk
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from tradstrat.rules import compile_rule
 from tradstrat.strategies import (
     STRATEGIES,
+    BuyAndHoldStrategy,
     DonchianBreakoutStrategy,
     MeanReversionStrategy,
     MomentumStrategy,
     MovingAverageCrossoverStrategy,
     RsiStrategy,
     create_strategy,
+    latest_signal,
     relative_strength_index,
 )
 
@@ -179,3 +182,22 @@ def test_momentum_follows_the_sign_of_the_trailing_return() -> None:
     signal = MomentumStrategy(2).generate_signals(make_bars([10.0, 11, 12, 11, 10, 9]))["signal"]
 
     assert signal.tolist() == [0, 0, 1, 0, 0, 0]
+
+
+def test_latest_signal_reports_the_last_change() -> None:
+    from tradstrat.strategies import latest_signal
+
+    data = make_bars([5, 15, 15, 5, 15, 15])
+
+    signal = latest_signal(create_strategy(compile_rule("close > 10")), data)
+
+    assert signal.long
+    assert signal.as_of == data.index[-1]
+    assert signal.since == data.index[4]
+
+
+def test_latest_signal_has_no_start_when_it_never_changed() -> None:
+    signal = latest_signal(BuyAndHoldStrategy(), random_walk(50))
+
+    assert signal.long
+    assert signal.since is None

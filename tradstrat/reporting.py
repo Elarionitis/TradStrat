@@ -118,8 +118,12 @@ def _compare(strategy: float, benchmark: float) -> Tone:
     return "good" if strategy > benchmark else "bad"
 
 
-def assess(strategy: Metrics, benchmark: Metrics, probability_beats_benchmark: float) -> Verdict:
+def assess(
+    strategy: Metrics, benchmark: Metrics, probability_beats_benchmark: float, asset: str = "the asset"
+) -> Verdict:
     """Judge a strategy against buy and hold in the terms a reader cares about.
+
+    ``asset`` names what was held, so the headline can say "just holding SPY" rather than an abstraction.
 
     ``probability_beats_benchmark`` is the bootstrap share of resampled histories in which the strategy's
     Sharpe ratio was higher. The verdict only claims an edge when that share reaches 95%.
@@ -172,17 +176,19 @@ def assess(strategy: Metrics, benchmark: Metrics, probability_beats_benchmark: f
         headline = "The strategy never traded"
         summary = "No entry signal fired. Try a longer history or different parameters."
     elif sharpe_tone == "good" and probability >= 0.95:
-        tone, headline = "good", "Beat buy and hold, and probably not by luck"
+        tone, headline = "good", f"Beat just holding {asset}, and probably not by luck"
         summary = "The edge held up in at least 95% of resampled histories. Confirm it with walk-forward."
     elif sharpe_tone == "good":
-        tone, headline = "warning", "Beat buy and hold, but it could be luck"
+        tone, headline = "warning", f"Beat just holding {asset}, but it could be luck"
         summary = "The risk-adjusted return was higher, but not consistently enough to rule out chance."
     elif drawdown_tone == "good":
-        tone, headline = "warning", "A smoother ride, but buy and hold did better"
-        summary = "It cut the worst decline, but earned less per unit of risk than simply holding."
+        tone, headline = "warning", f"A smoother ride, but just holding {asset} did better"
+        summary = (
+            f"It cut the worst decline, but earned less per unit of risk than buying {asset} and holding it."
+        )
     else:
-        tone, headline = "bad", "Buy and hold did better"
-        summary = "Simply holding the asset earned more per unit of risk, with no deeper decline."
+        tone, headline = "bad", f"Just holding {asset} did better"
+        summary = f"Buying {asset} and holding it earned more per unit of risk, with no deeper decline."
     return Verdict(tone=tone, headline=headline, summary=summary, findings=tuple(findings))
 
 

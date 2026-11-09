@@ -164,6 +164,42 @@ MUTATIONS = [
         "relative_rank = rank / configurations",
         "Overfitting test misplaces the median rank",
     ),
+    (
+        "rules.py",
+        "return close.rolling(days, min_periods=days).mean()",
+        "return close.rolling(days, min_periods=days, center=True).mean()",
+        "Look-ahead: a rule's average is centered on today",
+    ),
+    (
+        "rules.py",
+        "np.concatenate([[False], (before_opposite & defined)[:-1]])",
+        "np.concatenate([(before_opposite & defined)[1:], [False]])",
+        "Look-ahead: a cross compares with tomorrow, not yesterday",
+    ),
+    (
+        "rules.py",
+        'data["High"].astype(float).rolling(days, min_periods=days).max().shift(1)',
+        'data["High"].astype(float).rolling(days, min_periods=days).max()',
+        "A rule's channel includes today, so a breakout can never fire",
+    ),
+    (
+        "rules.py",
+        "return close.pct_change(days, fill_method=None) * 100",
+        "return close.pct_change(days, fill_method=None)",
+        "A rule's return is a fraction, not the percent it is written in",
+    ),
+    (
+        "rules.py",
+        'combine = np.logical_and if condition.joiner == "and" else np.logical_or',
+        'combine = np.logical_or if condition.joiner == "and" else np.logical_and',
+        "A rule mixes up 'and' and 'or'",
+    ),
+    (
+        "strategies.py",
+        "signal.index[different[-1] + 1]",
+        "signal.index[different[-1]]",
+        "The latest signal's start date is a day early",
+    ),
 ]
 
 

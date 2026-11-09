@@ -48,6 +48,23 @@ CSV files are matched by column name without regard to case, so exports that use
 `timestamp` load as they are. Dates may be text or Unix timestamps in seconds or milliseconds. Volume is
 optional, because index and currency data often have none.
 
+## Custom Rules
+
+A custom rule is parsed into comparisons between indicators and numbers, and compiled into a strategy class
+whose parameters are the rule's numbers. Repeated indicators, such as `sma(200)` in both the buy and the sell
+rule, share one parameter, so tuning cannot give the two sides different windows.
+
+Every indicator on a bar uses data up to and including that bar's close. `high(n)` and `low(n)` cover the
+previous `n` bars and exclude the current one, so a close can break above them. A cross requires both sides to
+be defined on the previous bar, so a series that starts above a line has not crossed it. Indicators are
+undefined during their warm-up, and a comparison with an undefined side is false, so no rule can trade before
+it has enough history.
+
+Without a sell rule, the position is held only while the buy rule is true. With one, the position is entered
+when the buy rule fires and held until the sell rule fires, as the built-in reversal and breakout strategies
+do. The tests check that the built-in moving average, momentum, Donchian and RSI strategies, written as rules,
+produce identical positions.
+
 ## Metrics
 
 Returns are simple daily returns, and annualization uses 252 trading days. The risk-free return `rf` is

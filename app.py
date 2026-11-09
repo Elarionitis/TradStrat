@@ -56,8 +56,16 @@ from tradstrat.reporting import (
     comparison_table,
     format_metric,
 )
+from tradstrat.rules import EXAMPLES, RuleError, RuleStrategy, compile_rule
 from tradstrat.stats import BootstrapResult, bootstrap, probabilistic_sharpe_ratio
-from tradstrat.strategies import STRATEGIES, create_strategy, indicator_overlays
+from tradstrat.strategies import (
+    STRATEGIES,
+    StrategyRef,
+    create_strategy,
+    indicator_overlays,
+    latest_signal,
+    strategy_class,
+)
 from tradstrat.tearsheet import ReportContext, build_report
 from tradstrat.validation import (
     OBJECTIVES,
@@ -70,6 +78,31 @@ from tradstrat.validation import (
 
 REPOSITORY: Final[str] = "https://github.com/Elarionitis/TradStrat"
 STRATEGY_KEYS: Final[list[str]] = [key for key in STRATEGIES if key != "buy_and_hold"]
+CUSTOM: Final[str] = "custom"
+STRATEGY_CHOICES: Final[list[str]] = [*STRATEGY_KEYS, CUSTOM]
+DEFAULT_RULE: Final[tuple[str, str]] = EXAMPLES["Golden cross"]
+# A search runs one backtest per combination, so a rule with many numbers can ask for far too many.
+MAX_COMBINATIONS: Final[int] = 1_500
+# The building blocks of a custom rule, with an example and what it means.
+RULE_PARTS: Final[list[tuple[str, str]]] = [
+    ("close", "The closing price."),
+    ("sma(50)", "The average closing price of the last 50 days."),
+    ("ema(20)", "Like sma, but recent days count for more, so it reacts faster."),
+    ("rsi(14)", "The RSI, from 0 to 100. Under 30 is often called oversold, and over 70 overbought."),
+    (
+        "high(252)",
+        "The highest price of the previous 252 days, not counting today. 252 days is about a year.",
+    ),
+    ("low(20)", "The lowest price of the previous 20 days, not counting today."),
+    ("return(126)", "The percentage change over 126 days. return(126) > 0 means up over about six months."),
+    ("zscore(20)", "How far the price is from its 20-day average, in standard deviations. Below -2 is rare."),
+]
+RULE_OPERATORS: Final[list[tuple[str, str]]] = [
+    ("> and <", "Above or below, on each day."),
+    ("crosses above", "Was at or below yesterday, and is above today. It happens on a single day."),
+    ("crosses below", "Was at or above yesterday, and is below today."),
+    ("and, or", "Combine conditions: all must hold, or any one is enough."),
+]
 QUICK_TICKERS: Final[list[str]] = ["SPY", "QQQ", "AAPL", "NVDA", "BTC-USD", "GLD"]
 PERIODS: Final[dict[str, int | None]] = {"1Y": 1, "3Y": 3, "5Y": 5, "10Y": 10, "20Y": 20, "Max": None}
 SOURCES: Final[dict[str, str]] = {"Yahoo": "Ticker", "CSV": "CSV file", "Sample": "Demo"}
@@ -137,18 +170,36 @@ class Inputs:
     end: pd.Timestamp
     upload: Any
     strategy_key: str
+    strategy: StrategyRef | None
     params: dict[str, float]
     config: BacktestConfig | None
     config_error: str | None
     cash: str
     fixed_rate: float
+    rule: str = ""
+    rule_error: str | None = None
+
+    @property
+    def strategy_class(self) -> Any:
+        assert self.strategy is not None
+        return strategy_class(self.strategy)
 
     def fingerprint(self) -> str:
         """Identifies the data and settings, so stored search results are never shown for other inputs."""
         upload = getattr(self.upload, "file_id", None)
         config = asdict(self.config) if self.config else None
         return repr(
-            (self.source, self.ticker, self.start, self.end, upload, self.strategy_key, config, self.cash)
+            (
+                self.source,
+                self.ticker,
+                self.start,
+                self.end,
+                upload,
+                self.strategy_key,
+                self.rule,
+                config,
+                self.cash,
+            )
         )
 
 
@@ -176,8 +227,14 @@ def cached_bootstrap(returns: pd.Series, benchmark: pd.Series) -> BootstrapResul
 
 
 @st.cache_data(show_spinner="Running every strategy...")
-def cached_comparison(prices: pd.DataFrame, config: BacktestConfig) -> Comparison:
-    return compare_strategies(prices, config)
+def cached_comparison(
+    prices: pd.DataFrame, config: BacktestConfig, rule: tuple[str, str] | None = None
+) -> Comparison:
+    """Every built-in strategy at its defaults, plus the custom rule when there is one."""
+    keys: list[StrategyRef] = list(STRATEGY_KEYS)
+    if rule is not None:
+        keys.insert(0, compile_rule(*rule))
+    return compare_strategies(prices, config, keys)
 
 
 def load_prices(inputs: Inputs) -> tuple[pd.DataFrame, str | None]:
@@ -287,32 +344,125 @@ def _typed_ticker() -> None:
 def param_widget(strategy_key: str, spec: Any) -> float:
     """Render one strategy parameter, using the range the strategy declares."""
     kind = int if spec.is_integer else float
+    key = f"{strategy_key}.{spec.name}"
+    st.session_state.setdefault(key, kind(spec.default))
     return st.slider(
         spec.label,
         min_value=kind(spec.low),
         max_value=kind(spec.high),
-        value=kind(spec.default),
         step=kind(spec.step),
         help=spec.help,
-        key=f"{strategy_key}.{spec.name}",
+        key=key,
     )
+
+
+def literal(text: str) -> str:
+    """Escape Markdown, so text quoted from a rule, which may come from a shared link, shows as typed."""
+    return re.sub(r"([\\`*_{}\[\]()<>#+\-.!|~$])", r"\\\1", text)
+
+
+def _use_example() -> None:
+    choice = st.session_state.get("rule_example")
+    if choice:
+        st.session_state["rule_buy"], st.session_state["rule_sell"] = EXAMPLES[choice]
+
+
+def _edited_rule() -> None:
+    """Editing a rule by hand deselects the example it started from."""
+    st.session_state["rule_example"] = None
+
+
+def read_rule() -> tuple[StrategyRef | None, str, str | None]:
+    """The custom-rule editor. Returns the compiled rule, its text, and an error if it cannot be read."""
+    st.session_state.setdefault("rule_buy", DEFAULT_RULE[0])
+    st.session_state.setdefault("rule_sell", DEFAULT_RULE[1])
+    if "rule_example" not in st.session_state:
+        current = (st.session_state["rule_buy"], st.session_state["rule_sell"])
+        st.session_state["rule_example"] = next(
+            (name for name, rule in EXAMPLES.items() if rule == current), None
+        )
+    st.pills("Start from an example", list(EXAMPLES), key="rule_example", on_change=_use_example)
+    buy = st.text_input("Buy when", key="rule_buy", on_change=_edited_rule)
+    sell = st.text_input(
+        "Sell when",
+        key="rule_sell",
+        on_change=_edited_rule,
+        placeholder="Empty: sell once the buy rule stops being true",
+    )
+    text = f"{buy.strip()} | {sell.strip()}"
+    try:
+        return compile_rule(buy, sell), text, None
+    except RuleError as error:
+        st.error(literal(str(error)), icon=":material/error:")
+        return None, text, str(error)
+
+
+# Shareable links. The address bar always holds the market, history and strategy, so copying it shares the
+# exact test. Advanced settings are left out to keep links short.
+
+
+def restore_from_link() -> None:
+    """On the first run of a session, start from the settings in the link, ignoring anything invalid."""
+    if st.session_state.get("link_read"):
+        return
+    st.session_state["link_read"] = True
+    query = st.query_params
+    if query.get("source") in SOURCES:
+        st.session_state["source"] = query["source"]
+    if query.get("ticker"):
+        st.session_state["ticker"] = query["ticker"].strip().upper()[:20]
+    if query.get("history") in PERIODS:
+        st.session_state["history"] = query["history"]
+    strategy = query.get("strategy")
+    if strategy not in STRATEGY_CHOICES:
+        return
+    st.session_state["strategy"] = strategy
+    if strategy == CUSTOM:
+        st.session_state["rule_buy"] = query.get("buy", "")[:300]
+        st.session_state["rule_sell"] = query.get("sell", "")[:300]
+        return
+    for spec in STRATEGIES[strategy].params:
+        try:
+            value = float(query.get(spec.name, ""))
+        except ValueError:
+            continue
+        if spec.low <= value <= spec.high:
+            st.session_state[f"{strategy}.{spec.name}"] = int(value) if spec.is_integer else value
+
+
+def write_link(inputs: Inputs, history: str | None) -> None:
+    link: dict[str, str] = {"source": inputs.source}
+    if inputs.source == "Yahoo":
+        link["ticker"] = inputs.ticker.strip().upper()
+        if history:
+            link["history"] = history
+    link["strategy"] = inputs.strategy_key
+    if inputs.strategy_key == CUSTOM:
+        link["buy"] = st.session_state.get("rule_buy", "")
+        if st.session_state.get("rule_sell"):
+            link["sell"] = st.session_state["rule_sell"]
+    else:
+        defaults = {spec.name: spec.default for spec in STRATEGIES[inputs.strategy_key].params}
+        link |= {name: f"{value:g}" for name, value in inputs.params.items() if value != defaults[name]}
+    if dict(st.query_params) != link:
+        st.query_params.from_dict(link)
 
 
 def read_sidebar() -> Inputs:
     today = pd.Timestamp.today().normalize()
     with st.sidebar:
         st.subheader("Market")
+        st.session_state.setdefault("source", "Yahoo")
         source = st.segmented_control(
             "Data source",
             list(SOURCES),
             format_func=SOURCES.__getitem__,
-            default="Yahoo",
             key="source",
             required=True,
             width="stretch",
             label_visibility="collapsed",
         )
-        ticker, start, end, upload, label = "", today, today, None, "Demo data"
+        ticker, start, end, upload, label, period = "", today, today, None, "Demo data", None
         if source == "Yahoo":
             st.session_state.setdefault("ticker", "SPY")
             ticker = st.text_input(
@@ -329,7 +479,8 @@ def read_sidebar() -> Inputs:
                 on_change=_pick_ticker,
                 label_visibility="collapsed",
             )
-            period = st.select_slider("History", list(PERIODS), value="10Y")
+            st.session_state.setdefault("history", "10Y")
+            period = st.select_slider("History", list(PERIODS), key="history")
             years = PERIODS[period]
             if st.toggle("Pick exact dates", key="custom_dates"):
                 left, right = st.columns(2)
@@ -354,14 +505,23 @@ def read_sidebar() -> Inputs:
         st.subheader("Strategy")
         strategy_key = st.selectbox(
             "Strategy",
-            STRATEGY_KEYS,
-            format_func=lambda key: STRATEGIES[key].label,
+            STRATEGY_CHOICES,
+            format_func=lambda key: "Write your own rule" if key == CUSTOM else STRATEGIES[key].label,
+            key="strategy",
             label_visibility="collapsed",
         )
-        st.caption(guide_for(STRATEGIES[strategy_key]).summary)
-        if st.button("How this strategy works", type="tertiary", icon=":material/menu_book:"):
-            strategy_dialog(strategy_key)
-        params = {spec.name: param_widget(strategy_key, spec) for spec in STRATEGIES[strategy_key].params}
+        rule, rule_error = "", None
+        if strategy_key == CUSTOM:
+            strategy, rule, rule_error = read_rule()
+            if st.button("How rules work", type="tertiary", icon=":material/menu_book:"):
+                rules_dialog()
+            params = {spec.name: spec.default for spec in strategy.params} if strategy else {}
+        else:
+            strategy = strategy_key
+            st.caption(guide_for(STRATEGIES[strategy_key]).summary)
+            if st.button("How this strategy works", type="tertiary", icon=":material/menu_book:"):
+                strategy_dialog(strategy_key)
+            params = {spec.name: param_widget(strategy_key, spec) for spec in STRATEGIES[strategy_key].params}
 
         st.space("small")
         with st.expander("Advanced settings"):
@@ -426,7 +586,7 @@ def read_sidebar() -> Inputs:
         error = None
     except ValueError as exc:
         config, error = None, str(exc)
-    return Inputs(
+    inputs = Inputs(
         source or "Yahoo",
         label,
         ticker,
@@ -434,12 +594,17 @@ def read_sidebar() -> Inputs:
         end,
         upload,
         strategy_key,
+        strategy,
         params,
         config,
         error,
         cash,
         fixed_rate,
+        rule,
+        rule_error,
     )
+    write_link(inputs, None if st.session_state.get("custom_dates") else period)
+    return inputs
 
 
 # Explanations.
@@ -473,6 +638,44 @@ def guide_html(key: str) -> str:
 </div>"""
 
 
+def rules_html() -> str:
+    """The rule language on one card: what each building block means, and how to combine them."""
+    seen: set[str] = set()
+    parts = "".join(
+        f"<tr><td><code>{html.escape(code)}</code></td><td>{rich(meaning, seen)}</td></tr>"
+        for code, meaning in RULE_PARTS
+    )
+    operators = "".join(
+        f"<tr><td><code>{html.escape(code)}</code></td><td>{rich(meaning, seen)}</td></tr>"
+        for code, meaning in RULE_OPERATORS
+    )
+    examples = "".join(
+        f"<li><strong>{html.escape(name)}.</strong> Buy when <code>{html.escape(buy)}</code>"
+        + (f", sell when <code>{html.escape(sell)}</code>" if sell else ", and hold while it stays true")
+        + ".</li>"
+        for name, (buy, sell) in EXAMPLES.items()
+    )
+    return f"""<div class="ts">
+  <p>A rule says when to buy and when to sell, in short phrases such as <code>close &gt; sma(200)</code>.
+  Change any number, such as the 200, to test a variation. Leave <strong>Sell when</strong> empty to own the
+  asset only while the buy rule is true.</p>
+  <div class="ts-label">What a rule can look at</div>
+  <table class="ts-table">{parts}</table>
+  <div class="ts-label">How to compare and combine</div>
+  <table class="ts-table">{operators}</table>
+  <div class="ts-label">Examples</div>
+  <ul>{examples}</ul>
+  <p class="ts-muted ts-small">A rule only sees prices up to today's close, and trades at the next day's open,
+  so it can never peek at the future. The Tune tab can search every number in your rule, and checks the winner
+  for {rich("overfitting", seen)} just as it does for the built-in strategies.</p>
+</div>"""
+
+
+@st.dialog("How rules work", width="large")
+def rules_dialog() -> None:
+    st.html(rules_html())
+
+
 @st.dialog("How this strategy works", width="large")
 def strategy_dialog(key: str) -> None:
     st.subheader(STRATEGIES[key].label)
@@ -501,7 +704,7 @@ def render_welcome() -> None:
     steps = [
         ("Pick a market.", "Type a ticker in the sidebar, or tap one of the popular ones."),
         (
-            "Pick a strategy.",
+            "Pick a strategy, or write your own.",
             "Each is a simple rule for when to buy and when to sell. **How this strategy works** "
             "explains it in plain English.",
         ),
@@ -529,12 +732,35 @@ def render_welcome() -> None:
         st.button("Got it", on_click=_hide_welcome, key="welcome_dismiss")
 
 
+def signal_html(prices: pd.DataFrame, inputs: Inputs) -> str:
+    """What the rule says at the latest close, and since when."""
+    signal = latest_signal(create_strategy(inputs.strategy_class, **inputs.params), prices)
+    tone, mark = ("good", "●") if signal.long else ("neutral", "○")
+    stance = f"Own {html.escape(inputs.label)}" if signal.long else "Hold cash"
+    since = f"since {signal.since:%d %b %Y}" if signal.since is not None else "for the whole history"
+    tip = (
+        "What the rule said at the last close in the data. Following it means trading at the next open. "
+        "This describes the rule, and is not a recommendation."
+    )
+    return f"""<div class="ts-signal ts-tone-{tone}">
+  <div class="ts-eyebrow">
+    <span class="term" tabindex="0" data-tip="{html.escape(tip)}">Latest signal</span>
+  </div>
+  <div class="ts-signal-stance"><span class="ts-signal-mark">{mark}</span>{stance}</div>
+  <div class="ts-meta" style="margin-top:2px">{since}, as of {signal.as_of:%d %b %Y}</div>
+</div>"""
+
+
 def render_context(prices: pd.DataFrame, inputs: Inputs, warning: str | None) -> None:
-    """The rule being tested, in one sentence, and the conditions it was tested under."""
+    """The rule being tested, in one sentence, what it is compared with, and what it says today."""
     seen: set[str] = set()
     config = inputs.config
     assert config is not None
-    rule = guide_for(STRATEGIES[inputs.strategy_key]).describe_rule(inputs.label, inputs.params)
+    rule = guide_for(inputs.strategy_class).describe_rule(inputs.label, inputs.params)
+    benchmark = (
+        f"Compared with **buy and hold**: buying {inputs.label} on the first day and keeping it, with the "
+        "same costs. A rule is only worth following if it beats that."
+    )
     cash = {
         "Treasury bills": "idle cash earns Treasury bill yields",
         "Fixed rate": f"idle cash earns {inputs.fixed_rate:.2%} a year",
@@ -552,10 +778,14 @@ def render_context(prices: pd.DataFrame, inputs: Inputs, warning: str | None) ->
         details.append(f"{'trailing' if config.trailing_stop else 'fixed'} stop {config.stop_loss:.0%} below")
     meta = " · ".join(rich(detail, seen) for detail in details)
     st.html(
-        f"""<div class="ts ts-card">
-  <div class="ts-eyebrow">The rule being tested</div>
-  <div class="ts-rule">{rich(rule, seen)}</div>
-  <div class="ts-meta">{meta}</div>
+        f"""<div class="ts ts-card ts-context">
+  <div class="ts-context-main">
+    <div class="ts-eyebrow">The rule being tested</div>
+    <div class="ts-rule">{rich(rule, seen)}</div>
+    <div class="ts-benchmark">{rich(benchmark, seen)}</div>
+    <div class="ts-meta">{meta}</div>
+  </div>
+  {signal_html(prices, inputs)}
 </div>"""
     )
     if warning:
@@ -637,9 +867,11 @@ def render_kpis(result: BacktestResult) -> None:
         _metric(column, label, value, delta, chart_data=sparkline or None, chart_type=kind, help=explanation)
 
 
-def render_results(result: BacktestResult, estimate: BootstrapResult | None, theme: ChartTheme) -> None:
+def render_results(
+    result: BacktestResult, estimate: BootstrapResult | None, theme: ChartTheme, asset: str
+) -> None:
     probability = estimate.probability_beats_benchmark if estimate else float("nan")
-    render_verdict(assess(result.metrics, result.benchmark_metrics, probability))
+    render_verdict(assess(result.metrics, result.benchmark_metrics, probability, asset))
     st.space("small")
     render_kpis(result)
 
@@ -746,7 +978,7 @@ def render_trades(result: BacktestResult, prices: pd.DataFrame, inputs: Inputs, 
         "watches. Trades fill at the next day's open, after commission and slippage.",
         muted=True,
     )
-    strategy = create_strategy(inputs.strategy_key, **inputs.params)
+    strategy = create_strategy(inputs.strategy_class, **inputs.params)
     overlays = indicator_overlays(strategy, prices)
     index = result.results.index
     chart(
@@ -804,8 +1036,14 @@ def render_trades(result: BacktestResult, prices: pd.DataFrame, inputs: Inputs, 
     )
 
 
-def _settings_text(key: str, params: dict[str, Any]) -> str:
-    labels = {spec.name: spec.label for spec in STRATEGIES[key].params}
+def _settings_text(strategy: StrategyRef, params: dict[str, Any]) -> str:
+    """Settings as a reader would write them: a custom rule with its numbers filled in, or label and value."""
+    cls = strategy_class(strategy)
+    if issubclass(cls, RuleStrategy):
+        rule = create_strategy(cls, **params)
+        assert isinstance(rule, RuleStrategy)
+        return rule.text
+    labels = {spec.name: spec.label for spec in cls.params}
     return ", ".join(f"{labels[name]} {value}" for name, value in params.items())
 
 
@@ -827,12 +1065,18 @@ def render_search(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> No
     objective = right.selectbox(
         "Pick the winner by", OBJECTIVES, format_func=lambda name: METRIC_LABELS.get(name, name)
     )
-    if button.button("Run search", type="primary", width="stretch"):
-        grid = build_grid(inputs.strategy_key, points)
+    combinations = math.prod(len(spec.grid(points)) for spec in inputs.strategy_class.params)
+    if combinations > MAX_COMBINATIONS:
+        st.caption(
+            f"That would test {combinations:,} combinations. Try fewer values per setting, or fewer "
+            "numbers in the rule."
+        )
+    elif button.button("Run search", type="primary", width="stretch"):
+        grid = build_grid(inputs.strategy_class, points)
         with st.spinner(f"Testing {len(grid)} combinations..."):
             st.session_state["search"] = (
                 inputs.fingerprint(),
-                grid_search(prices, inputs.strategy_key, grid, inputs.config, objective),
+                grid_search(prices, inputs.strategy_class, grid, inputs.config, objective),
             )
 
     stored = st.session_state.get("search")
@@ -840,7 +1084,7 @@ def render_search(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> No
         st.caption("Run a search to see how much the result depends on the settings.")
         return
     search = stored[1]
-    parameters = [spec.name for spec in STRATEGIES[inputs.strategy_key].params]
+    parameters = [spec.name for spec in inputs.strategy_class.params]
     overfitting = search.overfitting.probability if search.overfitting else float("nan")
     columns = st.columns(4)
     columns[0].metric("Combinations tried", len(search.table), border=True)
@@ -865,14 +1109,14 @@ def render_search(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> No
     )
     render_verdict(assess_search(search.deflated_active_sharpe, overfitting))
     prose(
-        f"**Best settings:** {_settings_text(inputs.strategy_key, search.best_params)}. Against cash rather "
-        f"than buy and hold, the chance the edge is real would be {search.deflated_sharpe:.0%}.",
+        f"**Best settings:** {_settings_text(inputs.strategy_class, search.best_params)}. Against cash "
+        f"rather than buy and hold, the chance the edge is real would be {search.deflated_sharpe:.0%}.",
         muted=True,
     )
 
     left, right = st.columns(2)
     with left:
-        labels = {spec.name: spec.label for spec in STRATEGIES[inputs.strategy_key].params}
+        labels = {spec.name: spec.label for spec in inputs.strategy_class.params}
         chart(search_figure(search.table, parameters, search.objective, theme, labels))
     with right:
         if search.overfitting is not None:
@@ -898,14 +1142,14 @@ def render_walk_forward(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme)
             help="Keep every past year in the training window instead of sliding it forward.",
         )
     if columns[3].button("Run walk-forward", type="primary", width="stretch"):
-        grid = build_grid(inputs.strategy_key, points)
+        grid = build_grid(inputs.strategy_class, points)
         try:
             with st.spinner("Choosing settings and testing each window..."):
                 st.session_state["walk"] = (
                     inputs.fingerprint(),
                     walk_forward(
                         prices,
-                        inputs.strategy_key,
+                        inputs.strategy_class,
                         grid,
                         inputs.config,
                         train_bars=TRAIN_WINDOWS[train],
@@ -954,7 +1198,11 @@ def render_walk_forward(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme)
     chart(equity_figure(result.equity, result.benchmark, theme, "Growth on unseen data"))
     chart(fold_scores_figure(result.folds, result.objective, theme))
     with st.expander("Window by window"):
-        folds = result.folds.assign(Parameters=result.folds["Parameters"].astype(str))
+        folds = result.folds.assign(
+            Parameters=[
+                _settings_text(inputs.strategy_class, params) for params in result.folds["Parameters"]
+            ]
+        )
         st.dataframe(
             folds.round({"In-Sample Score": 3, "Out-of-Sample Score": 3, "Test Return": 4}),
             hide_index=True,
@@ -978,12 +1226,16 @@ def render_compare(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> N
         "sit in cash part of the time often fall less in a crash, and rise less in a boom.",
         muted=True,
     )
-    comparison = cached_comparison(prices, inputs.config)
+    rule = None
+    if inputs.strategy_key == CUSTOM:
+        rule = (st.session_state.get("rule_buy", ""), st.session_state.get("rule_sell", ""))
+    comparison = cached_comparison(prices, inputs.config, rule)
     if comparison.table.empty:
         st.warning("This history is too short for any strategy's indicators.")
         return
     chart(comparison_figure(comparison.equity, theme))
     styles = {cls.label: guide_for(cls).style for cls in STRATEGIES.values()}
+    styles[RuleStrategy.label] = "Your rule"
     columns = ["Strategy", "cagr", "sharpe_ratio", "max_drawdown", "exposure", "number_of_trades"]
     table = comparison.table[columns].rename(columns=METRIC_LABELS)
     table.insert(1, "Style", table["Strategy"].map(styles))
@@ -1026,6 +1278,14 @@ def render_guide() -> None:
         for key in [*STRATEGY_KEYS, "buy_and_hold"]:
             with st.expander(f"{STRATEGIES[key].label}  ·  {guide_for(STRATEGIES[key]).style}"):
                 st.html(guide_html(key))
+
+        section(
+            "Write your own rule",
+            "Choose **Write your own rule** in the sidebar to test an idea of your own, with the same "
+            "checks.",
+        )
+        with st.expander("What a rule can use"):
+            st.html(rules_html())
     with right:
         section("Glossary")
         query = st.text_input(
@@ -1061,13 +1321,12 @@ def report_builder(
     """Build the HTML report only when someone clicks download."""
 
     def build() -> str:
-        strategy = create_strategy(inputs.strategy_key, **inputs.params)
+        cls = inputs.strategy_class
+        strategy = create_strategy(cls, **inputs.params)
         context = ReportContext(
-            strategy=STRATEGIES[inputs.strategy_key].label,
+            strategy=cls.label if inputs.strategy_key != CUSTOM else repr(strategy),
             asset=inputs.label,
-            parameters={
-                spec.name: getattr(strategy, spec.name) for spec in STRATEGIES[inputs.strategy_key].params
-            },
+            parameters={spec.name: getattr(strategy, spec.name) for spec in cls.params},
             overlays=indicator_overlays(strategy, prices),
         )
         return build_report(result, context, estimate=estimate)
@@ -1079,6 +1338,7 @@ def main() -> None:
     st.set_page_config(page_title="TradStrat", page_icon=":material/monitoring:", layout="wide")
     theme = theme_for(st.context.theme.type == "dark")
     inject_styles(theme)
+    restore_from_link()
     inputs = read_sidebar()
 
     header, actions = st.columns([4, 1], vertical_alignment="center")
@@ -1089,8 +1349,12 @@ def main() -> None:
     if inputs.config is None:
         st.error(inputs.config_error)
         return
+    if inputs.strategy is None:
+        st.error(f"Your rule could not be read. {literal(inputs.rule_error or '')}")
+        st.html(f'<div class="ts-card">{rules_html()}</div>')
+        return
     try:
-        strategy = create_strategy(inputs.strategy_key, **inputs.params)
+        strategy = create_strategy(inputs.strategy_class, **inputs.params)
     except ValueError as error:
         st.error(f"These settings don't work together: {error}")
         return
@@ -1101,7 +1365,7 @@ def main() -> None:
         return
     if len(prices) <= strategy.warmup + 1:
         st.warning(
-            f"{STRATEGIES[inputs.strategy_key].label} needs more than {strategy.warmup} trading days of "
+            f"{inputs.strategy_class.label} needs more than {strategy.warmup} trading days of "
             f"history, but only {len(prices)} are available. Use a longer history or shorter windows."
         )
         return
@@ -1127,7 +1391,7 @@ def main() -> None:
 
     results, trades, tune, compare, guide = st.tabs(TABS)
     with results:
-        render_results(result, estimate, theme)
+        render_results(result, estimate, theme, inputs.label)
     with trades:
         render_trades(result, prices, inputs, theme)
     with tune:

@@ -88,7 +88,12 @@ BASE = Metrics(
         (replace(BASE, sharpe_ratio=1.2), 0.97, "good", "probably not by luck"),
         (replace(BASE, sharpe_ratio=1.2), 0.70, "warning", "could be luck"),
         (replace(BASE, sharpe_ratio=0.5, max_drawdown=-0.10), 0.20, "warning", "smoother ride"),
-        (replace(BASE, sharpe_ratio=0.5, max_drawdown=-0.40), 0.20, "bad", "Buy and hold did better"),
+        (
+            replace(BASE, sharpe_ratio=0.5, max_drawdown=-0.40),
+            0.20,
+            "bad",
+            "Just holding the asset did better",
+        ),
         (replace(BASE, number_of_trades=0, sharpe_ratio=float("nan")), float("nan"), "warning", "never"),
     ],
 )

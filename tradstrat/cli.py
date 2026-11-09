@@ -30,8 +30,9 @@ from tradstrat.reporting import (
     overfitting_verdict,
     probability_verdict,
 )
+from tradstrat.rules import VOCABULARY, RuleError, compile_rule
 from tradstrat.stats import bootstrap, probabilistic_sharpe_ratio
-from tradstrat.strategies import STRATEGIES, create_strategy, indicator_overlays
+from tradstrat.strategies import STRATEGIES, StrategyRef, create_strategy, indicator_overlays, strategy_class
 from tradstrat.tearsheet import ReportContext, build_report, write_report
 from tradstrat.validation import OBJECTIVES, build_grid, compare_strategies, grid_search, walk_forward
 
@@ -67,6 +68,12 @@ def _shared_options() -> argparse.ArgumentParser:
     parser.add_argument("--start", help="First date, YYYY-MM-DD. Default: ten years before --end.")
     parser.add_argument("--end", help="Last date, YYYY-MM-DD. Default: today.")
     parser.add_argument("--strategy", default="ma_crossover", choices=sorted(STRATEGIES))
+    parser.add_argument(
+        "--buy", metavar="RULE", help="Test your own rule instead, such as 'sma(50) crosses above sma(200)'."
+    )
+    parser.add_argument(
+        "--sell", metavar="RULE", default="", help="When your rule sells. Omit to hold while --buy is true."
+    )
     parser.add_argument("--capital", type=float, default=10_000.0)
     parser.add_argument("--commission", type=float, default=0.001, help="Fraction of traded value.")
     parser.add_argument("--slippage-bps", type=float, default=5.0)
@@ -156,6 +163,15 @@ def _config(args: argparse.Namespace) -> BacktestConfig:
     )
 
 
+def _strategy(args: argparse.Namespace) -> StrategyRef:
+    """The registered strategy named by --strategy, or the custom rule given by --buy and --sell."""
+    if args.buy is None:
+        if args.sell:
+            raise RuleError("--sell needs a --buy rule to go with it.")
+        return str(args.strategy)
+    return compile_rule(args.buy, args.sell)
+
+
 def _period(data: pd.DataFrame) -> str:
     return f"{data.index[0].date()} to {data.index[-1].date()} ({len(data)} bars)"
 
@@ -165,10 +181,15 @@ def _list_strategies() -> None:
         print(f"{key}: {cls.description}")
         for spec in cls.params:
             print(f"    {spec.name} (default {spec.default}, range {spec.low} to {spec.high}): {spec.help}")
+    print(
+        "\nOr write your own with --buy and --sell, such as\n"
+        "    --buy 'sma(50) crosses above sma(200)' --sell 'sma(50) crosses below sma(200)'\n"
+        f"Rules can use {VOCABULARY}, numbers, >, <, 'crosses above', 'crosses below', 'and' and 'or'."
+    )
 
 
-def _print_verdict(result: BacktestResult, probability: float) -> None:
-    verdict = assess(result.metrics, result.benchmark_metrics, probability)
+def _print_verdict(result: BacktestResult, probability: float, asset: str) -> None:
+    verdict = assess(result.metrics, result.benchmark_metrics, probability, asset)
     print(f"\n{TONE_MARKERS[verdict.tone]} {verdict.headline}")
     print(f"    {verdict.summary}")
     for finding in verdict.findings:
@@ -177,7 +198,7 @@ def _print_verdict(result: BacktestResult, probability: float) -> None:
 
 def _run_backtest(args: argparse.Namespace) -> None:
     data = _load_data(args)
-    strategy = create_strategy(args.strategy, **dict(args.param))
+    strategy = create_strategy(_strategy(args), **dict(args.param))
     result = run_backtest(data, strategy, _config(args))
     returns = result.excess_returns
 
@@ -196,7 +217,7 @@ def _run_backtest(args: argparse.Namespace) -> None:
         probability = estimate.probability_beats_benchmark
         print(f"Sharpe 95% interval: {estimate.sharpe.low:.2f} to {estimate.sharpe.high:.2f}")
         print(f"Probability of beating buy and hold: {probability:.1%}")
-    _print_verdict(result, probability)
+    _print_verdict(result, probability, _asset_label(args))
 
     if args.trades_out:
         result.trade_log.to_csv(args.trades_out, index=False)
@@ -205,12 +226,14 @@ def _run_backtest(args: argparse.Namespace) -> None:
 
 def _run_report(args: argparse.Namespace) -> None:
     data = _load_data(args)
-    strategy = create_strategy(args.strategy, **dict(args.param))
+    reference = _strategy(args)
+    strategy = create_strategy(reference, **dict(args.param))
     result = run_backtest(data, strategy, _config(args))
+    cls = strategy_class(reference)
     context = ReportContext(
-        strategy=STRATEGIES[args.strategy].label,
+        strategy=cls.label,
         asset=_asset_label(args),
-        parameters={spec.name: getattr(strategy, spec.name) for spec in STRATEGIES[args.strategy].params},
+        parameters={spec.name: getattr(strategy, spec.name) for spec in cls.params},
         overlays=indicator_overlays(strategy, data),
     )
     path = write_report(args.out, build_report(result, context, offline=args.offline))
@@ -236,10 +259,11 @@ def _run_compare(args: argparse.Namespace) -> None:
 
 def _run_optimize(args: argparse.Namespace) -> None:
     data = _load_data(args)
-    grid = build_grid(args.strategy, args.points)
-    search = grid_search(data, args.strategy, grid, _config(args), args.objective)
+    reference = _strategy(args)
+    grid = build_grid(reference, args.points)
+    search = grid_search(data, reference, grid, _config(args), args.objective)
 
-    print(f"{args.strategy}: {len(grid)} combinations, {_period(data)}\n")
+    print(f"{create_strategy(reference)}: {len(grid)} combinations, {_period(data)}\n")
     print(search.table.head(args.top).round(3).to_string(index=False))
     print(f"\nBest: {search.best_params}")
     print("This score is in-sample. Use walk-forward to measure performance on unseen data.")
@@ -253,10 +277,11 @@ def _run_optimize(args: argparse.Namespace) -> None:
 
 def _run_walk_forward(args: argparse.Namespace) -> None:
     data = _load_data(args)
+    reference = _strategy(args)
     result = walk_forward(
         data,
-        args.strategy,
-        build_grid(args.strategy, args.points),
+        reference,
+        build_grid(reference, args.points),
         _config(args),
         train_bars=args.train_bars,
         test_bars=args.test_bars,
@@ -265,7 +290,7 @@ def _run_walk_forward(args: argparse.Namespace) -> None:
     )
 
     columns = ["Fold", "Test Start", "Test End", "Parameters", "In-Sample Score", "Out-of-Sample Score"]
-    print(f"{args.strategy}: {len(result.folds)} folds, {_period(data)}\n")
+    print(f"{create_strategy(reference)}: {len(result.folds)} folds, {_period(data)}\n")
     print(result.folds[columns].to_string(index=False, float_format="{:.2f}".format))
     print("\nOut-of-sample performance:\n")
     print(comparison_table(result.metrics, result.benchmark_metrics).to_string())

@@ -30,6 +30,10 @@ dashboard, command line, optimizer and look-ahead tests pick it up automatically
 use data up to and including that bar, and nothing later. A plain-English entry in `tradstrat/guide.py` is
 optional; without one, the dashboard shows the strategy's `description`.
 
+Many ideas need no new class at all: try writing them as a rule first, as the README describes. To add a
+building block to the rule language, add it to `INDICATORS` in `tradstrat/rules.py`, compute it in
+`RuleStrategy._series` from data up to each bar only, and add a test in `tests/test_rules.py`.
+
 ## Ground Rules
 
 - **No look-ahead.** A decision may only use information available when it is made. If you touch the engine,

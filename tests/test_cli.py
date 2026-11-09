@@ -185,3 +185,40 @@ def test_report_escapes_untrusted_labels() -> None:
 
     assert "<script>alert(1)</script>" not in text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;.csv" in text
+
+
+def test_backtest_accepts_a_custom_rule(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(
+        ["backtest", "--sample", "--buy", "rsi(2) < 10 and close > sma(200)", "--sell", "rsi(2) > 70"]
+    )
+
+    assert code == 0
+    output = capsys.readouterr().out
+    assert "buy when rsi(2) < 10 and close > sma(200); sell when rsi(2) > 70" in output
+    assert "Sharpe Ratio" in output
+
+
+def test_optimize_tunes_the_numbers_in_a_custom_rule(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["optimize", "--sample", "--buy", "close > sma(100)", "--points", "3"]) == 0
+
+    output = capsys.readouterr().out
+    assert "3 combinations" in output
+    assert "Deflated Sharpe" in output
+
+
+def test_an_unreadable_rule_is_a_clean_error(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["backtest", "--sample", "--buy", "close above sma(20)"]) == 1
+
+    assert "Could not read" in capsys.readouterr().err
+
+
+def test_sell_without_buy_is_a_clean_error(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["backtest", "--sample", "--sell", "close < sma(20)"]) == 1
+
+    assert "--sell needs a --buy" in capsys.readouterr().err
+
+
+def test_list_explains_how_to_write_a_rule(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["list"]) == 0
+
+    assert "--buy" in capsys.readouterr().out

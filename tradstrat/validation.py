@@ -17,7 +17,7 @@ import pandas as pd
 from tradstrat.engine import BacktestConfig, BacktestResult, run_backtest
 from tradstrat.metrics import Metrics, calculate_metrics, daily_returns, sharpe_ratio
 from tradstrat.stats import OverfittingResult, deflated_sharpe_ratio, probability_of_backtest_overfitting
-from tradstrat.strategies import STRATEGIES, BuyAndHoldStrategy, create_strategy
+from tradstrat.strategies import STRATEGIES, BuyAndHoldStrategy, StrategyRef, create_strategy, strategy_class
 
 OBJECTIVES: Final[tuple[str, ...]] = (
     "sharpe_ratio",
@@ -29,16 +29,16 @@ OBJECTIVES: Final[tuple[str, ...]] = (
 Params = dict[str, Any]
 
 
-def build_grid(key: str, points: int = 5, overrides: dict[str, list[float]] | None = None) -> list[Params]:
+def build_grid(
+    key: StrategyRef, points: int = 5, overrides: dict[str, list[float]] | None = None
+) -> list[Params]:
     """Build every valid parameter combination for a strategy.
 
     Each parameter spans its declared range unless ``overrides`` lists explicit values. Combinations the
     strategy rejects, such as a short window above the long window, are left out.
     """
-    if key not in STRATEGIES:
-        raise ValueError(f"Unknown strategy {key!r}.")
     overrides = overrides or {}
-    axes = {spec.name: overrides.get(spec.name, spec.grid(points)) for spec in STRATEGIES[key].params}
+    axes = {spec.name: overrides.get(spec.name, spec.grid(points)) for spec in strategy_class(key).params}
 
     grid: list[Params] = []
     for values in product(*axes.values()):
@@ -71,7 +71,7 @@ class _Scores:
 
 
 def _score_grid(
-    data: pd.DataFrame, key: str, grid: list[Params], config: BacktestConfig, objective: str
+    data: pd.DataFrame, key: StrategyRef, grid: list[Params], config: BacktestConfig, objective: str
 ) -> _Scores:
     """Backtest each combination and rank them best first, with undefined scores last."""
     benchmark_returns = _benchmark_returns(data, config)
@@ -127,7 +127,7 @@ class SearchResult:
 
 def grid_search(
     data: pd.DataFrame,
-    key: str,
+    key: StrategyRef,
     grid: list[Params] | None = None,
     config: BacktestConfig | None = None,
     objective: str = "sharpe_ratio",
@@ -191,7 +191,7 @@ class WalkForwardResult:
 
 def walk_forward(
     data: pd.DataFrame,
-    key: str,
+    key: StrategyRef,
     grid: list[Params] | None = None,
     config: BacktestConfig | None = None,
     *,
@@ -294,23 +294,26 @@ class Comparison:
 
 
 def compare_strategies(
-    data: pd.DataFrame, config: BacktestConfig | None = None, keys: list[str] | None = None
+    data: pd.DataFrame, config: BacktestConfig | None = None, keys: list[StrategyRef] | None = None
 ) -> Comparison:
     """Run each strategy with its declared defaults. No tuning happens, so nothing here is in-sample.
 
     Strategies whose indicators need more history than ``data`` holds are left out.
     """
     config = config or BacktestConfig()
-    keys = keys if keys is not None else [key for key in STRATEGIES if key != BuyAndHoldStrategy.key]
+    references: list[StrategyRef] = (
+        keys if keys is not None else [key for key in STRATEGIES if key != BuyAndHoldStrategy.key]
+    )
     rows = []
     curves = {}
-    for key in keys:
-        strategy = create_strategy(key)
+    for reference in references:
+        strategy = create_strategy(reference)
         if strategy.warmup >= len(data) - 1:
             continue
+        label = strategy_class(reference).label
         result = run_backtest(data, strategy, config, include_benchmark=False)
-        curves[STRATEGIES[key].label] = result.results["Strategy Equity"]
-        rows.append({"Strategy": STRATEGIES[key].label, **result.metrics.as_dict()})
+        curves[label] = result.results["Strategy Equity"]
+        rows.append({"Strategy": label, **result.metrics.as_dict()})
 
     if rows:
         # Run buy and hold as a strategy of its own, so its row has a trade count and exposure too.

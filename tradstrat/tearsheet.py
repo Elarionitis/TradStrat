@@ -169,7 +169,7 @@ def build_report(
     if estimate is None and len(result.excess_returns.dropna()) >= 40:
         estimate = bootstrap(result.excess_returns, result.benchmark_excess_returns)
     probability = estimate.probability_beats_benchmark if estimate is not None else float("nan")
-    verdict = assess(result.metrics, result.benchmark_metrics, probability)
+    verdict = assess(result.metrics, result.benchmark_metrics, probability, context.asset)
 
     results = result.results
     figures = [

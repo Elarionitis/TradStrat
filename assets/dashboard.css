@@ -248,3 +248,82 @@
 .ts-note strong {
   color: var(--ts-muted);
 }
+
+.ts-context {
+  display: flex;
+  gap: 18px 28px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.ts-context-main {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+.ts-benchmark {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--ts-muted);
+}
+
+.ts-signal {
+  flex: 0 0 210px;
+  padding-left: 22px;
+  border-left: 1px solid var(--ts-border);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.ts-signal-stance {
+  font-size: 18px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ts-signal-mark {
+  color: var(--tone);
+  font-size: 15px;
+}
+
+@media (max-width: 640px) {
+  .ts-signal {
+    flex-basis: 100%;
+    padding-left: 0;
+    padding-top: 12px;
+    border-left: none;
+    border-top: 1px solid var(--ts-border);
+  }
+}
+
+.ts code {
+  font-family: "JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size: .88em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--ts-border);
+  color: var(--ts-ink);
+  white-space: nowrap;
+}
+
+.ts-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0 14px;
+  font-size: 14px;
+}
+
+.ts-table td {
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid var(--ts-border);
+  vertical-align: top;
+}
+
+.ts-table td:first-child {
+  width: 1%;
+  white-space: nowrap;
+  padding-right: 16px;
+}
