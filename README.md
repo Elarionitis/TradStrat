@@ -19,8 +19,15 @@ holding the asset, puts confidence intervals on the outcome, and measures how mu
 fitting noise. Then it gives you the answer in plain English.
 
 <picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/landing_dark.png">
+  <img src="docs/images/landing.png" alt="TradStrat opens with ready-made questions such as whether the golden cross beats the S&P 500">
+</picture>
+
+Pick a question, or set up your own test, and the answer comes back as a head-to-head with simply holding:
+
+<picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard_dark.png">
-  <img src="docs/images/dashboard.png" alt="TradStrat dashboard">
+  <img src="docs/images/dashboard.png" alt="TradStrat results: the golden cross against just holding SPY">
 </picture>
 
 ## What You Can Do With It
@@ -33,6 +40,8 @@ fitting noise. Then it gives you the answer in plain English.
   be luck"*, and the reasons behind it.
 - **See what the rule says today.** Whether it would own the asset or hold cash at the latest close, and since
   when.
+- **Start from a question.** Six ready-made tests, such as whether a simple trend rule dodged Bitcoin's
+  crashes, run on real prices in one click.
 - **Start without a finance background.** The dashboard states the rule being tested in one sentence, explains
   every strategy in plain English, and defines each piece of jargon when you hover over it.
 - **See how fragile a result is.** Bootstrap intervals, the probabilistic and deflated Sharpe ratios, and the
@@ -76,25 +85,30 @@ simulated, so results on it say nothing about real markets.
 
 ## What It Found
 
-I ran five classic strategies on six ETFs from 2007 to 2025. Parameters were tuned only on past data, trades
+I ran seven classic strategies on six ETFs from 2007 to 2025. Parameters were tuned only on past data, trades
 paid commission and slippage, and idle cash earned Treasury bill yields. [Full results](docs/RESULTS.md).
 
 | Measure | Result |
 | --- | --- |
-| Mean Sharpe ratio, in-sample | 0.82 |
-| Mean Sharpe ratio, out-of-sample | **0.22** |
+| Mean Sharpe ratio, in-sample | 0.73 |
+| Mean Sharpe ratio, out-of-sample | **0.20** |
 | Mean Sharpe ratio, buy and hold | 0.52 |
-| Runs with a higher Sharpe than buy and hold | 1 of 30 |
-| Runs with a higher CAGR than buy and hold | 1 of 30 |
-| Runs with a shallower max drawdown than buy and hold | 22 of 30 |
-| Full-sample winners significant against zero | 6 of 30 |
-| Full-sample winners significant against buy and hold | **0 of 30** |
-| Mean probability of backtest overfitting | 39% |
+| Runs with a higher Sharpe than buy and hold | 1 of 42 |
+| Runs with a higher CAGR than buy and hold | 1 of 42 |
+| Runs with a shallower max drawdown than buy and hold | 33 of 42 |
+| Full-sample winners significant against zero | 8 of 42 |
+| Full-sample winners significant against buy and hold | **0 of 42** |
+| Mean probability of backtest overfitting | 42% |
 
 The strategies cut drawdowns, but none showed reliable evidence of beating buy and hold. Risk-adjusted
 performance fell by about three quarters once parameters had to be chosen in advance. The one run that beat
 buy and hold on both Sharpe and CAGR was a moving average crossover on long Treasuries, with a Sharpe ratio of
 0.21 against 0.16.
+
+The two strategies added in 2.1 make the point from opposite ends. The 200-day trend filter, with a single
+setting to tune, kept the most of its backtest (a mean Sharpe of 0.51 in-sample and 0.30 out of sample) and
+cut the worst crash on all six assets. MACD, with three settings, fell from 0.53 to -0.01: the more knobs a
+rule has, the more of its backtest is fitted noise.
 
 The benchmark you test against matters as much as the statistics. On ten years of SPY, the best moving
 average crossover gets a deflated Sharpe ratio of 95.3% against cash, which looks like a discovery. Against
