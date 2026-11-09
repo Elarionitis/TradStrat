@@ -1,15 +1,19 @@
-"""Plain-English explanations of each strategy, for readers who have never met it before.
+"""Plain-English explanations of the built-in strategies, for readers who have never met them before.
 
 Each guide says what the strategy believes, exactly when it buys and sells, and the markets it suits and
 struggles in. ``rule`` is a template filled with the strategy's current settings, so the dashboard can state
 the rule being tested in one sentence, such as "Own SPY while its 50-day average price is above its 200-day
 average price".
+
+Guides are optional. A strategy without one is shown with its own one-line ``description`` instead.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+
+from tradstrat.strategies import Strategy
 
 
 @dataclass(frozen=True)
@@ -18,15 +22,17 @@ class StrategyGuide:
 
     style: str
     summary: str
-    idea: str
-    buys: str
-    sells: str
-    works_when: str
-    struggles_when: str
-    rule: str
+    idea: str = ""
+    buys: str = ""
+    sells: str = ""
+    works_when: str = ""
+    struggles_when: str = ""
+    rule: str = ""
 
     def describe_rule(self, asset: str, params: Mapping[str, float]) -> str:
         """The rule in one sentence, with this run's asset and settings filled in."""
+        if not self.rule:
+            return self.summary
         return self.rule.format(asset=asset, **params)
 
 
@@ -137,3 +143,8 @@ GUIDES: dict[str, StrategyGuide] = {
         ),
     ),
 }
+
+
+def guide_for(strategy: type[Strategy]) -> StrategyGuide:
+    """The written guide for a strategy, or a minimal one built from its own description."""
+    return GUIDES.get(strategy.key) or StrategyGuide(style="Custom", summary=strategy.description)

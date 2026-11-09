@@ -14,7 +14,7 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
   to the bottom half out of sample, using combinatorially symmetric cross-validation over 12,870 splits.
 - **Trailing stops** that follow the highest high of completed bars.
 - **A plain-English verdict** on every backtest, shared by the dashboard, the command line and the report.
-- **Help for newcomers.** The dashboard states the rule being tested in one sentence, explains every strategy
+- **Help for newcomers.** The dashboard states the rule being tested in one sentence, explains each built-in strategy
   in plain English, opens with a short welcome, and defines jargon such as the Sharpe ratio on hover.
 - **A verdict on parameter searches** that combines the deflated Sharpe ratio and the probability of
   overfitting into one plain answer.

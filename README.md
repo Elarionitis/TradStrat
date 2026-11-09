@@ -219,8 +219,7 @@ The suite blocks network access, so it never depends on Yahoo being available.
 
 ## Add a Strategy
 
-Write one class, and give it a plain-English guide. The dashboard, CLI and optimizer pick it up from its
-declared parameters.
+Write one class. The dashboard, CLI and optimizer pick it up from its declared parameters.
 
 ```python
 @register
@@ -246,11 +245,9 @@ class MyStrategy(Strategy):
         return pd.DataFrame({"signal": signal, "average": average}, index=data.index)
 ```
 
-`overlays` is optional and draws the strategy's own indicator lines on the price chart. Then add an entry to
-`GUIDES` in `tradstrat/guide.py`: what the strategy believes, when it buys and sells, where it works and
-struggles, and its rule as a sentence such as `"Own {asset} while its close is above its {window}-day
-average."`. A test fails until every strategy has one, and the look-ahead tests cover the new strategy
-automatically.
+`overlays` is optional and draws the strategy's own indicator lines on the price chart. The dashboard
+describes the strategy with its `description`, and the look-ahead tests cover it automatically. For a fuller
+explanation in the dashboard, you can also add an entry to `GUIDES` in `tradstrat/guide.py`.
 
 ## Project Structure
 
@@ -265,7 +262,7 @@ tradstrat/
     stats.py              Deflated Sharpe, block bootstrap and probability of overfitting
     validation.py         Parameter search, walk-forward validation and strategy comparison
     reporting.py          Display formatting and the plain-English verdicts
-    guide.py              Plain-English explanation of every strategy
+    guide.py              Plain-English explanations of the built-in strategies
     glossary.py           Definitions, and the helper that shows them on hover
     charts.py             Plotly figures for light and dark themes
     tearsheet.py          Self-contained HTML reports

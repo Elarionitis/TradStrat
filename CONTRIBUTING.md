@@ -25,10 +25,10 @@ The test suite blocks network access, so tests never depend on Yahoo Finance bei
 
 ## Adding a Strategy
 
-Write one class in `tradstrat/strategies.py` with the `@register` decorator, as the README shows, and a
-plain-English entry for it in `tradstrat/guide.py`. The dashboard, command line, optimizer and look-ahead
-tests pick it up automatically. Its signal on each bar may
-use data up to and including that bar, and nothing later.
+Write one class in `tradstrat/strategies.py` with the `@register` decorator, as the README shows. The
+dashboard, command line, optimizer and look-ahead tests pick it up automatically. Its signal on each bar may
+use data up to and including that bar, and nothing later. A plain-English entry in `tradstrat/guide.py` is
+optional; without one, the dashboard shows the strategy's `description`.
 
 ## Ground Rules
 

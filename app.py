@@ -46,7 +46,7 @@ from tradstrat.data import (
 )
 from tradstrat.engine import BacktestConfig, BacktestResult, run_backtest
 from tradstrat.glossary import GLOSSARY, annotate
-from tradstrat.guide import GUIDES
+from tradstrat.guide import guide_for
 from tradstrat.metrics import calendar_year_returns, rolling_sharpe
 from tradstrat.reporting import (
     METRIC_LABELS,
@@ -358,7 +358,7 @@ def read_sidebar() -> Inputs:
             format_func=lambda key: STRATEGIES[key].label,
             label_visibility="collapsed",
         )
-        st.caption(GUIDES[strategy_key].summary)
+        st.caption(guide_for(STRATEGIES[strategy_key]).summary)
         if st.button("How this strategy works", type="tertiary", icon=":material/menu_book:"):
             strategy_dialog(strategy_key)
         params = {spec.name: param_widget(strategy_key, spec) for spec in STRATEGIES[strategy_key].params}
@@ -447,7 +447,7 @@ def read_sidebar() -> Inputs:
 
 def guide_html(key: str) -> str:
     """Everything a newcomer needs to understand one strategy, as a block of HTML."""
-    guide = GUIDES[key]
+    guide = guide_for(STRATEGIES[key])
     seen: set[str] = set()
     settings = "".join(
         f"<li><strong>{html.escape(spec.label)}</strong> (default {spec.default}). "
@@ -462,13 +462,13 @@ def guide_html(key: str) -> str:
         ("Tends to struggle in", guide.struggles_when),
     )
     grid = "".join(
-        f'<div><div class="ts-label">{label}</div>{rich(text, seen)}</div>' for label, text in cells
+        f'<div><div class="ts-label">{label}</div>{rich(text, seen)}</div>' for label, text in cells if text
     )
     return f"""<div class="ts">
   <span class="ts-chip ts-tone-neutral">{html.escape(guide.style)}</span>
   <p><strong>{rich(guide.summary, seen)}</strong></p>
-  <p class="ts-muted">{rich(guide.idea, seen)}</p>
-  <div class="ts-grid2">{grid}</div>
+  {f'<p class="ts-muted">{rich(guide.idea, seen)}</p>' if guide.idea else ""}
+  {f'<div class="ts-grid2">{grid}</div>' if grid else ""}
   {settings_block}
 </div>"""
 
@@ -534,7 +534,7 @@ def render_context(prices: pd.DataFrame, inputs: Inputs, warning: str | None) ->
     seen: set[str] = set()
     config = inputs.config
     assert config is not None
-    rule = GUIDES[inputs.strategy_key].describe_rule(inputs.label, inputs.params)
+    rule = guide_for(STRATEGIES[inputs.strategy_key]).describe_rule(inputs.label, inputs.params)
     cash = {
         "Treasury bills": "idle cash earns Treasury bill yields",
         "Fixed rate": f"idle cash earns {inputs.fixed_rate:.2%} a year",
@@ -983,7 +983,7 @@ def render_compare(prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> N
         st.warning("This history is too short for any strategy's indicators.")
         return
     chart(comparison_figure(comparison.equity, theme))
-    styles = {cls.label: GUIDES[key].style for key, cls in STRATEGIES.items()}
+    styles = {cls.label: guide_for(cls).style for cls in STRATEGIES.values()}
     columns = ["Strategy", "cagr", "sharpe_ratio", "max_drawdown", "exposure", "number_of_trades"]
     table = comparison.table[columns].rename(columns=METRIC_LABELS)
     table.insert(1, "Style", table["Strategy"].map(styles))
@@ -1024,7 +1024,7 @@ def render_guide() -> None:
 
         section("The strategies", "Each one is a simple, well-known rule. Open one to see how it decides.")
         for key in [*STRATEGY_KEYS, "buy_and_hold"]:
-            with st.expander(f"{STRATEGIES[key].label}  ·  {GUIDES[key].style}"):
+            with st.expander(f"{STRATEGIES[key].label}  ·  {guide_for(STRATEGIES[key]).style}"):
                 st.html(guide_html(key))
     with right:
         section("Glossary")

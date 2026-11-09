@@ -3,20 +3,44 @@
 from __future__ import annotations
 
 import re
+from typing import ClassVar
 
+import pandas as pd
 import pytest
 
 from tradstrat.glossary import ALIASES, GLOSSARY, annotate
-from tradstrat.guide import GUIDES
-from tradstrat.strategies import STRATEGIES
+from tradstrat.guide import GUIDES, guide_for
+from tradstrat.strategies import STRATEGIES, Strategy
 
 
-def test_every_registered_strategy_has_a_guide() -> None:
-    """A new strategy must explain itself before it appears in the dashboard."""
-    assert set(GUIDES) == set(STRATEGIES)
+class UnguidedStrategy(Strategy):
+    """A strategy someone added without writing a guide for it."""
+
+    key: ClassVar[str] = "unguided"
+    label: ClassVar[str] = "Unguided"
+    description: ClassVar[str] = "Long while the close is above its moving average."
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({"signal": 1}, index=data.index)
 
 
-@pytest.mark.parametrize("key", sorted(STRATEGIES))
+def test_guides_only_cover_registered_strategies() -> None:
+    assert set(GUIDES) <= set(STRATEGIES)
+
+
+def test_a_strategy_without_a_guide_falls_back_to_its_description() -> None:
+    guide = guide_for(UnguidedStrategy)
+
+    assert guide.style == "Custom"
+    assert guide.summary == UnguidedStrategy.description
+    assert guide.describe_rule("SPY", {}) == UnguidedStrategy.description
+
+
+def test_a_strategy_with_a_guide_uses_it() -> None:
+    assert guide_for(STRATEGIES["rsi"]) is GUIDES["rsi"]
+
+
+@pytest.mark.parametrize("key", sorted(GUIDES))
 def test_each_rule_names_the_asset_and_its_settings(key: str) -> None:
     params = {spec.name: spec.default for spec in STRATEGIES[key].params}
 
