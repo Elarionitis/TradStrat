@@ -528,7 +528,7 @@
 .ts-hero {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0,1.15fr) minmax(0,1fr);
+  grid-template-columns: minmax(0,1.45fr) minmax(0,1fr);
   gap: 28px;
   align-items: center;
   padding: 34px 32px;
@@ -569,7 +569,8 @@
 }
 
 .ts-hero-title {
-  font-size: clamp(28px, 3.4vw, 44px) !important;
+  font-size: clamp(26px, 2.6vw, 40px) !important;
+  text-wrap: balance;
   font-weight: 750 !important;
   letter-spacing: -.03em;
   line-height: 1.08 !important;
@@ -624,7 +625,8 @@
   border-radius: 16px;
   padding: 16px 16px 14px;
   gap: 12px;
-  animation: ts-rise .6s cubic-bezier(.2,.7,.2,1) .3s both;
+  animation: ts-rise .6s cubic-bezier(.2,.7,.2,1) both;
+  animation-delay: calc(.3s + var(--order, 0) * 70ms);
   transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
 }
 

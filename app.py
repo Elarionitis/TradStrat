@@ -908,6 +908,9 @@ def render_landing(theme: ChartTheme) -> None:
         'Start with a question</div><div class="ts-muted">Pick one to run it on real prices. '
         "Each takes a few seconds.</div></div>"
     )
+    # Cards rise one after another. Their containers are Streamlit's, so each gets its place by key.
+    order = "".join(f".st-key-question_{q.key}{{--order:{n}}}" for n, q in enumerate(QUESTIONS))
+    st.html(f"<style>{order}</style>")
     for row in (QUESTIONS[:3], QUESTIONS[3:]):
         for column, question in zip(st.columns(3, gap="small"), row, strict=True):
             with column, st.container(key=f"question_{question.key}"):

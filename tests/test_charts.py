@@ -10,6 +10,7 @@ from conftest import random_walk
 from tradstrat.charts import (
     DARK,
     LIGHT,
+    RULE_NAME,
     annual_returns_figure,
     bootstrap_figure,
     comparison_figure,
@@ -115,7 +116,7 @@ def test_every_figure_uses_the_requested_theme(result, theme) -> None:
     ]
     for figure in figures:
         assert figure.layout.title.font.color == theme.ink
-        assert {trace.name: trace.marker.color or trace.line.color for trace in figure.data}["Strategy"] == (
+        assert {trace.name: trace.marker.color or trace.line.color for trace in figure.data}[RULE_NAME] == (
             theme.strategy
         )
 

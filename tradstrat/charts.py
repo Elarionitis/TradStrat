@@ -20,6 +20,9 @@ from tradstrat.metrics import calendar_year_returns, rolling_sharpe
 from tradstrat.rules import RuleStrategy
 from tradstrat.strategies import STRATEGIES, BuyAndHoldStrategy
 
+# The two lines on every comparison chart, named as the dashboard's answer names them.
+RULE_NAME: Final[str] = "Your rule"
+HOLD_NAME: Final[str] = "Just holding"
 FONT_FAMILY: Final[str] = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif"
 MONTHS: Final[list[str]] = [
     "Jan",
@@ -203,12 +206,12 @@ def equity_figure(
 ) -> go.Figure:
     figure = go.Figure(
         [
-            _line(benchmark, "Buy and Hold", theme.benchmark),
-            _line(strategy, "Strategy", theme.strategy),
+            _line(benchmark, HOLD_NAME, theme.benchmark),
+            _line(strategy, RULE_NAME, theme.strategy),
         ]
     )
-    _label_line_end(figure, strategy, "Strategy", theme)
-    _label_line_end(figure, benchmark, "Buy and Hold", theme)
+    _label_line_end(figure, strategy, RULE_NAME, theme)
+    _label_line_end(figure, benchmark, HOLD_NAME, theme)
     _crosshair(figure, theme)
     figure.update_traces(hovertemplate="$%{y:,.0f}")
     figure.update_yaxes(tickprefix="$", separatethousands=True, type="log" if log_scale else "linear")
@@ -227,9 +230,9 @@ def _fit_dates(figure: go.Figure, index: pd.Index) -> None:
 def drawdown_figure(strategy: pd.Series, benchmark: pd.Series, theme: ChartTheme = LIGHT) -> go.Figure:
     figure = go.Figure(
         [
-            _line(benchmark, "Buy and Hold", theme.benchmark),
+            _line(benchmark, HOLD_NAME, theme.benchmark),
             _line(
-                strategy, "Strategy", theme.strategy, fill="tozeroy", fillcolor=_alpha(theme.strategy, 0.14)
+                strategy, RULE_NAME, theme.strategy, fill="tozeroy", fillcolor=_alpha(theme.strategy, 0.14)
             ),
         ]
     )
@@ -340,8 +343,8 @@ def annual_returns_figure(strategy: pd.Series, benchmark: pd.Series, theme: Char
     years = [str(year) for year in strategy_years.index]
     figure = go.Figure(
         [
-            go.Bar(x=years, y=strategy_years, name="Strategy", marker={"color": theme.strategy}),
-            go.Bar(x=years, y=benchmark_years, name="Buy and Hold", marker={"color": theme.benchmark}),
+            go.Bar(x=years, y=strategy_years, name=RULE_NAME, marker={"color": theme.strategy}),
+            go.Bar(x=years, y=benchmark_years, name=HOLD_NAME, marker={"color": theme.benchmark}),
         ]
     )
     figure.update_traces(hovertemplate="%{y:.1%}", marker_cornerradius=4)
@@ -356,8 +359,8 @@ def rolling_sharpe_figure(
 ) -> go.Figure:
     figure = go.Figure(
         [
-            _line(rolling_sharpe(benchmark_returns, window), "Buy and Hold", theme.benchmark),
-            _line(rolling_sharpe(strategy_returns, window), "Strategy", theme.strategy),
+            _line(rolling_sharpe(benchmark_returns, window), HOLD_NAME, theme.benchmark),
+            _line(rolling_sharpe(strategy_returns, window), RULE_NAME, theme.strategy),
         ]
     )
     figure.add_hline(y=0, line={"color": theme.axis, "width": 1})
