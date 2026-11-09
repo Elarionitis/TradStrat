@@ -7,10 +7,20 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+import tradstrat.data as data_module
+from tradstrat.data import load_sample
 from tradstrat.strategies import STRATEGIES
 
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
 TABS = ["Results", "Trades", "Tune", "Compare", "Guide"]
+QUESTION_KEYS = [
+    "golden_cross",
+    "bitcoin_trend",
+    "nasdaq_dip",
+    "momentum_crash",
+    "gold_breakout",
+    "nvidia_macd",
+]
 
 
 @pytest.fixture
@@ -18,6 +28,7 @@ def app() -> AppTest:
     """The dashboard running on the bundled dataset, so no test touches the network."""
     test = AppTest.from_file(APP, default_timeout=90)
     test.session_state["source"] = "Sample"
+    test.session_state["started"] = True
     test.run()
     assert not test.exception
     return test
@@ -163,13 +174,47 @@ def test_jargon_explains_itself_on_hover(app: AppTest) -> None:
     assert 'data-tip="Return earned for each unit of risk' in rendered
 
 
-def test_newcomers_see_a_welcome_that_can_be_dismissed(app: AppTest) -> None:
-    assert "New to backtesting?" in " ".join(str(element.proto) for element in app.get("html"))
+def landing() -> AppTest:
+    test = AppTest.from_file(APP, default_timeout=90)
+    test.run()
+    assert not test.exception
+    return test
 
-    button(app, "Got it").click().run()
 
-    assert "New to backtesting?" not in " ".join(str(element.proto) for element in app.get("html"))
-    assert not app.exception
+def test_newcomers_land_on_questions_not_a_dashboard() -> None:
+    test = landing()
+
+    assert "Start with a question" in rendered(test)
+    assert not test.tabs
+    assert not test.error
+    assert not test.warning
+    assert {item.key for item in test.button} >= {f"ask_{key}" for key in QUESTION_KEYS}
+
+
+def test_a_question_runs_its_test_on_market_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    sample = load_sample()
+    monkeypatch.setattr(data_module, "PROVIDERS", (("stub", lambda *_: sample),))
+    test = landing()
+
+    next(item for item in test.button if item.key == "ask_bitcoin_trend").click().run()
+
+    assert not test.exception
+    assert not test.error
+    assert test.session_state["ticker"] == "BTC-USD"
+    assert test.session_state["strategy"] == "trend_filter"
+    assert [tab.label for tab in test.tabs] == TABS
+    assert test.query_params["ticker"] == "BTC-USD"
+
+
+def test_the_sidebar_route_and_ideas_button_switch_between_views() -> None:
+    test = landing()
+
+    button(test, "Or set up your own test in the sidebar").click().run()
+    assert [tab.label for tab in test.tabs] == TABS
+
+    button(test, "Ideas to try").click().run()
+    assert "Start with a question" in rendered(test)
+    assert not test.tabs
 
 
 def test_every_strategy_is_explained_in_the_guide(app: AppTest) -> None:

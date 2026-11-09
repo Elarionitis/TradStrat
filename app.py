@@ -107,6 +107,14 @@ RULE_OPERATORS: Final[list[tuple[str, str]]] = [
 ]
 QUICK_TICKERS: Final[list[str]] = ["SPY", "QQQ", "AAPL", "NVDA", "BTC-USD", "GLD"]
 PERIODS: Final[dict[str, int | None]] = {"1Y": 1, "3Y": 3, "5Y": 5, "10Y": 10, "20Y": 20, "Max": None}
+PERIOD_NAMES: Final[dict[str, str]] = {
+    "1Y": "1 year",
+    "3Y": "3 years",
+    "5Y": "5 years",
+    "10Y": "10 years",
+    "20Y": "20 years",
+    "Max": "all history",
+}
 SOURCES: Final[dict[str, str]] = {"Yahoo": "Ticker", "CSV": "CSV file", "Sample": "Demo"}
 EARLIEST: Final[pd.Timestamp] = pd.Timestamp("1970-01-01")
 CASH_OPTIONS: Final[list[str]] = ["Treasury bills", "Fixed rate", "None"]
@@ -414,6 +422,20 @@ def read_rule() -> tuple[StrategyRef | None, str, str | None]:
 # exact test. Advanced settings are left out to keep links short.
 
 
+def has_started(inputs: Inputs) -> bool:
+    """Whether to show results rather than the landing page.
+
+    Results appear once a visitor picks a question, opens a shared link, or changes any setting.
+    """
+    state = st.session_state
+    fingerprint = inputs.fingerprint() + repr(sorted(inputs.params.items()))
+    previous = state.get("last_inputs")
+    state["last_inputs"] = fingerprint
+    if previous is not None and previous != fingerprint:
+        state["started"] = True
+    return bool(state.get("started"))
+
+
 def restore_from_link() -> None:
     """On the first run of a session, start from the settings in the link, ignoring anything invalid."""
     if st.session_state.get("link_read"):
@@ -430,6 +452,7 @@ def restore_from_link() -> None:
     if strategy not in STRATEGY_CHOICES:
         return
     st.session_state["strategy"] = strategy
+    st.session_state["started"] = True  # A shared link goes straight to its results.
     if strategy == CUSTOM:
         st.session_state["rule_buy"] = query.get("buy", "")[:300]
         st.session_state["rule_sell"] = query.get("sell", "")[:300]
@@ -616,7 +639,7 @@ def read_sidebar() -> Inputs:
         rule,
         rule_error,
     )
-    write_link(inputs, None if st.session_state.get("custom_dates") else period)
+    st.session_state["_history_for_link"] = None if st.session_state.get("custom_dates") else period
     return inputs
 
 
@@ -706,43 +729,241 @@ def render_header() -> None:
     )
 
 
-def _hide_welcome() -> None:
-    st.session_state["welcome_hidden"] = True
+@dataclass(frozen=True)
+class Question:
+    """A ready-made test, phrased as the question a newcomer would ask."""
+
+    key: str
+    tag: str
+    question: str
+    detail: str
+    ticker: str
+    history: str
+    strategy: str
+    rule: tuple[str, str] = ("", "")
 
 
-def render_welcome() -> None:
-    """A short orientation for first-time visitors, dismissed for the rest of the session."""
-    if st.session_state.get("welcome_hidden"):
-        return
+QUESTIONS: Final[list[Question]] = [
+    Question(
+        "golden_cross",
+        "Trend following",
+        "Does the famous golden cross beat the S&P 500?",
+        "Own the market only while its 50-day average is above its 200-day average.",
+        "SPY",
+        "20Y",
+        "ma_crossover",
+    ),
+    Question(
+        "bitcoin_trend",
+        "Trend filter",
+        "Could one simple rule have dodged Bitcoin's crashes?",
+        "Hold Bitcoin only while it trades above its 200-day average price.",
+        "BTC-USD",
+        "Max",
+        "trend_filter",
+    ),
+    Question(
+        "nasdaq_dip",
+        "Buy the dip",
+        "Does buying sharp dips in the Nasdaq pay off?",
+        "Buy after a few days of heavy selling, but only while the long-term trend is up.",
+        "QQQ",
+        "20Y",
+        CUSTOM,
+        EXAMPLES["Dip in an uptrend"],
+    ),
+    Question(
+        "momentum_crash",
+        "Momentum",
+        "Would momentum have protected you in 2008?",
+        "Own the S&P 500 only while it is up over the last six months.",
+        "SPY",
+        "20Y",
+        "momentum",
+    ),
+    Question(
+        "gold_breakout",
+        "Breakout",
+        "Does buying gold at new highs work?",
+        "Buy when gold closes at a 55-day high, and sell at a 20-day low.",
+        "GLD",
+        "20Y",
+        "donchian",
+    ),
+    Question(
+        "nvidia_macd",
+        "Chart signal",
+        "Is the popular MACD signal worth following on Nvidia?",
+        "Own Nvidia while its MACD line is above its signal line.",
+        "NVDA",
+        "10Y",
+        "macd",
+    ),
+]
+
+
+def ask(question: Question) -> None:
+    """Load a ready-made test into the sidebar and show its results."""
+    state = st.session_state
+    state["source"] = "Yahoo"
+    state["ticker"] = question.ticker
+    state["ticker_pick"] = question.ticker if question.ticker in QUICK_TICKERS else None
+    state["history"] = question.history
+    state["custom_dates"] = False
+    state["strategy"] = question.strategy
+    if question.strategy == CUSTOM:
+        state["rule_buy"], state["rule_sell"] = question.rule
+        state["rule_example"] = next((name for name, rule in EXAMPLES.items() if rule == question.rule), None)
+    else:
+        for spec in STRATEGIES[question.strategy].params:
+            state[f"{question.strategy}.{spec.name}"] = spec.default
+    start()
+
+
+def start() -> None:
+    st.session_state["started"] = True
+
+
+def show_ideas() -> None:
+    st.session_state["started"] = False
+    st.query_params.clear()
+
+
+HERO_RULE_PATH: Final[str] = (
+    "M20 220 C60 214 80 196 110 200 S160 170 190 176 S240 132 270 140 S330 96 360 86 S390 70 400 64"
+)
+HERO_HOLD_PATH: Final[str] = (
+    "M20 222 C50 210 70 180 100 196 S140 150 160 172 S200 210 225 150 S260 120 290 160 S330 70 360 110 "
+    "S385 60 400 52"
+)
+
+
+def hero_chart(theme: ChartTheme) -> str:
+    """An illustrative chart of a rule racing buy and hold, drawn with its own animation.
+
+    Streamlit strips inline SVG from HTML, so the drawing is an SVG image with the theme's colors and its
+    animation written inside it.
+    """
+    colors = PALETTE[theme.name]
+    rule, hold, grid, muted = colors["rule"], colors["hold"], colors["border"], colors["muted"]
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 260">
+<style>
+.line{{fill:none;stroke-width:3;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;
+  animation:draw 2.2s cubic-bezier(.45,.05,.25,1) forwards}}
+.rule{{stroke:{rule};animation-delay:.35s}} .hold{{stroke:{hold};opacity:.9}}
+.area{{opacity:0;animation:fade 1s ease 1.9s forwards}}
+.dot{{transform-box:fill-box;transform-origin:center;transform:scale(0);
+  animation:pop .45s cubic-bezier(.3,1.6,.5,1) forwards,pulse 2.4s ease-in-out infinite}}
+.d1{{animation-delay:2.1s,3s}} .d2{{animation-delay:2.45s,3.3s}}
+text{{fill:{muted};font:500 12px system-ui,-apple-system,sans-serif}}
+@keyframes draw{{to{{stroke-dashoffset:0}}}} @keyframes fade{{to{{opacity:1}}}}
+@keyframes pop{{to{{transform:scale(1)}}}} @keyframes pulse{{50%{{transform:scale(1.35)}}}}
+@media (prefers-reduced-motion:reduce){{.line,.area,.dot{{animation:none;stroke-dashoffset:0;opacity:1;
+  transform:none}}}}
+</style>
+<defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="{rule}" stop-opacity=".25"/>
+<stop offset="1" stop-color="{rule}" stop-opacity="0"/>
+</linearGradient></defs>
+<g stroke="{grid}" stroke-dasharray="3 5"><line x1="20" y1="60" x2="400" y2="60"/>
+<line x1="20" y1="120" x2="400" y2="120"/><line x1="20" y1="180" x2="400" y2="180"/>
+<line x1="20" y1="240" x2="400" y2="240"/></g>
+<path class="area" d="{HERO_RULE_PATH} L400 240 L20 240 Z" fill="url(#f)"/>
+<path class="line hold" pathLength="1" d="{HERO_HOLD_PATH}"/>
+<path class="line rule" pathLength="1" d="{HERO_RULE_PATH}"/>
+<circle class="dot d1" cx="400" cy="52" r="5" fill="{hold}"/>
+<circle class="dot d2" cx="400" cy="64" r="5" fill="{rule}"/>
+<rect x="24" y="16" width="12" height="3" rx="1.5" fill="{rule}"/><text x="42" y="21">A trading rule</text>
+<rect x="146" y="16" width="12" height="3" rx="1.5" fill="{hold}"/><text x="164" y="21">Just holding</text>
+</svg>"""
+    encoded = base64.b64encode(svg.encode()).decode()
+    return (
+        f'<img class="ts-hero-chart" src="data:image/svg+xml;base64,{encoded}" '
+        'alt="Illustration: a trading rule and simply holding, racing over time">'
+    )
+
+
+def render_landing(theme: ChartTheme) -> None:
+    """The first screen: what TradStrat is for, in plain words, and questions to start from."""
+    seen: set[str] = set()
+    st.html(
+        f"""<div class="ts ts-hero">
+  <div class="ts-hero-text">
+    <div class="ts-hero-eyebrow ts-rise">Free, open source, no sign-up</div>
+    <h2 class="ts-hero-title ts-rise" style="--delay:.05s">Would this trading idea have made money?
+      <span>And should you believe it?</span></h2>
+    <p class="ts-hero-lead ts-rise" style="--delay:.12s">Traders follow rules like "buy when the price breaks
+      above its average". TradStrat replays a rule on real past prices, with real trading costs, and races
+      it against simply buying and holding. Then it tells you, in plain English, whether the result looks
+      like skill or luck.</p>
+    <div class="ts-hero-facts ts-rise" style="--delay:.2s">
+      <span>Stocks, ETFs and crypto</span><span>7 classic strategies</span><span>Or write your own</span>
+    </div>
+  </div>
+  <div class="ts-hero-art ts-rise" style="--delay:.1s">{hero_chart(theme)}</div>
+</div>"""
+    )
+    st.html(
+        '<div class="ts ts-landing-head ts-rise" style="--delay:.25s"><div class="ts-section-title">'
+        'Start with a question</div><div class="ts-muted">Pick one to run it on real prices. '
+        "Each takes a few seconds.</div></div>"
+    )
+    for row in (QUESTIONS[:3], QUESTIONS[3:]):
+        for column, question in zip(st.columns(3, gap="small"), row, strict=True):
+            with column, st.container(key=f"question_{question.key}"):
+                st.html(
+                    f"""<div class="ts ts-question">
+  <span class="ts-question-tag">{html.escape(question.tag)}</span>
+  <div class="ts-question-title">{html.escape(question.question)}</div>
+  <div class="ts-question-detail">{rich(question.detail, seen)}</div>
+  <div class="ts-question-meta">{html.escape(question.ticker)} · {PERIOD_NAMES[question.history]}</div>
+</div>"""
+                )
+                st.button(
+                    "Find out",
+                    key=f"ask_{question.key}",
+                    on_click=ask,
+                    args=(question,),
+                    icon=":material/arrow_forward:",
+                    width="stretch",
+                )
+
     steps = [
-        ("Pick a market.", "Type a ticker in the sidebar, or tap one of the popular ones."),
         (
-            "Pick a strategy, or write your own.",
-            "Each is a simple rule for when to buy and when to sell. **How this strategy works** "
-            "explains it in plain English.",
+            "Pick a market and a rule.",
+            "Any ticker on Yahoo Finance, one of seven classic strategies, or a rule you write yourself.",
         ),
         (
-            "Read the verdict.",
-            "It says whether the rule beat simply buying and holding, and whether that could be luck.",
+            "Replay the past.",
+            "Every trade fills at the next day's price, after commission and slippage, as it "
+            "would have for real.",
+        ),
+        (
+            "Get a straight answer.",
+            "Did the rule beat just holding? Could it be luck? Would it have held up "
+            "on data it was never tuned on?",
         ),
     ]
     items = "".join(
         f'<div class="ts-step"><span class="ts-step-number">{number}</span>'
-        f"<span><strong>{title}</strong> {rich(text)}</span></div>"
+        f"<span><strong>{title}</strong> {rich(text, seen)}</span></div>"
         for number, (title, text) in enumerate(steps, start=1)
     )
-    with st.container(border=True):
-        st.html(
-            f"""<div class="ts">
-  <div class="ts-section-title" style="margin-top:0">New to backtesting?</div>
-  <div class="ts-muted">TradStrat replays a trading rule on real past prices, as if you had followed it, with
-  realistic trading costs.</div>
+    st.html(
+        f"""<div class="ts ts-how">
+  <div class="ts-section-title">How it works</div>
   <div class="ts-steps">{items}</div>
   <div class="ts-muted ts-small">Words with a dotted underline, like {rich("Sharpe ratio")}, explain
   themselves when you hover over or tap them.</div>
 </div>"""
-        )
-        st.button("Got it", on_click=_hide_welcome, key="welcome_dismiss")
+    )
+    st.button(
+        "Or set up your own test in the sidebar",
+        key="start_own",
+        on_click=start,
+        type="tertiary",
+        icon=":material/tune:",
+    )
 
 
 def signal_html(prices: pd.DataFrame, inputs: Inputs) -> str:
@@ -1454,11 +1675,19 @@ def main() -> None:
     inject_styles(theme)
     restore_from_link()
     inputs = read_sidebar()
+    started = has_started(inputs)
 
-    header, actions = st.columns([4, 1], vertical_alignment="center")
+    header, ideas, actions = st.columns([5, 1.1, 1.4], vertical_alignment="center")
     with header:
         render_header()
-    render_welcome()
+    if not started:
+        render_landing(theme)
+        render_footer()
+        return
+    write_link(inputs, st.session_state.get("_history_for_link"))
+    ideas.button(
+        "Ideas to try", on_click=show_ideas, type="tertiary", icon=":material/lightbulb:", width="stretch"
+    )
 
     if inputs.config is None:
         st.error(inputs.config_error)
