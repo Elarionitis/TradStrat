@@ -158,13 +158,16 @@ The dashboard, command line and HTML report share one rule for their headline:
 
 | Headline | Condition |
 | --- | --- |
+| Better for the risk, but buy and hold made more money | Higher Sharpe, but a lower CAGR |
 | Beat buy and hold, and probably not by luck | Higher Sharpe, and higher in at least 95% of bootstrap resamples |
 | Beat buy and hold, but it could be luck | Higher Sharpe, but below that 95% bar |
 | A smoother ride, but buy and hold did better | Lower Sharpe, but a shallower maximum drawdown |
 | Buy and hold did better | Lower Sharpe and a drawdown at least as deep |
 
 The comparison uses Sharpe ratios on excess returns, so a strategy cannot win by holding cash or by taking
-more risk. The verdict describes one backtest. Walk-forward validation is still the test of whether a tuned
+more risk. A higher Sharpe with lower growth is reported as exactly that, because a rule that sits in cash often
+earns more per unit of risk while making less money, and calling it a win would contradict the dollar figures
+shown beside it. The verdict describes one backtest. Walk-forward validation is still the test of whether a tuned
 strategy works on unseen data.
 
 ## Block Bootstrap

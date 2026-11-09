@@ -88,6 +88,8 @@ BASE = Metrics(
     [
         (replace(BASE, sharpe_ratio=1.2), 0.97, "good", "probably not by luck"),
         (replace(BASE, sharpe_ratio=1.2), 0.70, "warning", "could be luck"),
+        (replace(BASE, sharpe_ratio=1.2, cagr=0.07), 0.97, "warning", "holding the asset made more money"),
+        (replace(BASE, sharpe_ratio=1.2, cagr=0.07), 0.70, "warning", "holding the asset made more money"),
         (replace(BASE, sharpe_ratio=0.5, max_drawdown=-0.10), 0.20, "warning", "smoother ride"),
         (
             replace(BASE, sharpe_ratio=0.5, max_drawdown=-0.40),

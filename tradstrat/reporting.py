@@ -212,6 +212,21 @@ def assess(
             "Its buy condition never came true in this stretch of history, so there is nothing to compare. "
             "Try a longer history, another market or different settings."
         )
+    elif sharpe_tone == "good" and strategy.cagr < benchmark.cagr:
+        # Winning on return for the risk while growing less is common for rules that sit in cash, and calling
+        # it a win outright contradicts the money line a newcomer reads next.
+        tone, headline = "warning", f"Better for the risk, but just holding {asset} made more money"
+        luck = (
+            "That lead held up in at least 95% of reshuffled histories."
+            if probability >= 0.95
+            else "That lead was not consistent across reshuffled histories, so it could also be luck."
+        )
+        summary = f"A higher risk-adjusted return, but lower growth than buying {asset} and holding it."
+        takeaway = (
+            "Each unit of risk earned more than holding did, but the rule sat in cash part of the time, "
+            "so it grew less overall. It suits someone who values a calmer ride over the biggest total. "
+            f"{luck}"
+        )
     elif sharpe_tone == "good" and probability >= 0.95:
         tone, headline = "good", f"Beat just holding {asset}, and probably not by luck"
         summary = "The edge held up in at least 95% of resampled histories. Confirm it with walk-forward."
