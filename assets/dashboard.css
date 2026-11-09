@@ -132,33 +132,8 @@
   margin-top: 1px;
 }
 
-.ts-verdict {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  padding: 16px 18px;
-  border-radius: 12px;
-  background: var(--wash);
-  border: 1px solid var(--ts-border);
-}
 
-.ts-badge {
-  flex: none;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: var(--tone);
-  color: var(--wash);
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  font-size: 16px;
-}
 
-.ts-headline {
-  font-size: 18px;
-  font-weight: 600;
-}
 
 .ts-findings {
   display: grid;
@@ -185,6 +160,11 @@
   text-align: center;
   font-weight: 700;
   color: var(--tone);
+}
+
+/* A weak finding is information, not an error, so its mark stays quiet. */
+.ts-tone-bad .ts-mark {
+  color: var(--ts-muted);
 }
 
 .ts-section-title {
@@ -326,4 +306,219 @@
   width: 1%;
   white-space: nowrap;
   padding-right: 16px;
+}
+
+/* The answer: a head-to-head between the rule and simply holding. */
+
+.ts-answer {
+  background: var(--ts-surface);
+  border: 1px solid var(--ts-border);
+  border-radius: 16px;
+  padding: 20px 22px 18px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px -12px rgba(0,0,0,.08);
+}
+
+.ts-answer-title {
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
+.ts-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  margin-right: 10px;
+  vertical-align: 3px;
+  background: color-mix(in srgb, var(--pill) 14%, transparent);
+  color: var(--pill);
+}
+
+.ts-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--pill);
+}
+
+.ts-pill-rule { --pill: var(--ts-rule); }
+.ts-pill-hold { --pill: var(--ts-hold); }
+.ts-pill-mixed { --pill: var(--ts-muted); }
+
+.ts-takeaway {
+  margin: 8px 0 0 !important;
+  max-width: 78ch;
+  color: var(--ts-ink);
+  opacity: .88;
+}
+
+.ts-rounds {
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(200px,1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.ts-round {
+  background: var(--ts-surface-2);
+  border-radius: 12px;
+  padding: 12px 14px 10px;
+  animation: ts-rise .5s cubic-bezier(.2,.7,.2,1) both;
+}
+
+.ts-round:nth-child(2) { animation-delay: .06s; }
+.ts-round:nth-child(3) { animation-delay: .12s; }
+.ts-round:nth-child(4) { animation-delay: .18s; }
+
+.ts-round-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.ts-round-title .term {
+  align-self: flex-start;
+}
+
+.ts-round-winner {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ts-muted);
+}
+
+.ts-win-rule { color: var(--ts-rule); }
+.ts-win-hold { color: var(--ts-hold); }
+
+.ts-bar-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "who value" "bar bar";
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+  font-size: 13px;
+  margin-top: 9px;
+  color: var(--ts-muted);
+}
+
+.ts-who { grid-area: who; }
+.ts-bar { grid-area: bar; }
+.ts-value { grid-area: value; }
+
+.ts-won {
+  color: var(--ts-ink);
+}
+
+.ts-won .ts-who, .ts-won .ts-value {
+  font-weight: 600;
+}
+
+.ts-value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 56px;
+}
+
+.ts-bar {
+  height: 7px;
+  border-radius: 99px;
+  background: var(--ts-border);
+  overflow: hidden;
+}
+
+.ts-bar i {
+  display: block;
+  height: 100%;
+  width: var(--w);
+  border-radius: 99px;
+  transform-origin: left center;
+  animation: ts-grow .9s cubic-bezier(.2,.7,.2,1) .15s both;
+}
+
+.ts-fill-rule { background: var(--ts-rule); }
+.ts-fill-hold { background: var(--ts-hold); }
+.ts-bar-row:not(.ts-won) .ts-bar i { opacity: .45; }
+
+.ts-hint {
+  font-size: 12px;
+  color: var(--ts-muted);
+  margin-top: 8px;
+}
+
+.ts-meter {
+  position: relative;
+  height: 10px;
+  margin-top: 14px;
+  border-radius: 99px;
+  background: var(--ts-border);
+}
+
+.ts-meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--w);
+  border-radius: 99px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ts-rule) 55%, transparent), var(--ts-rule));
+  transform-origin: left center;
+  animation: ts-grow 1.1s cubic-bezier(.2,.7,.2,1) .2s both;
+}
+
+.ts-meter b {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--ts-ink);
+}
+
+.ts-luck-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--ts-muted);
+  margin-top: 6px;
+}
+
+.ts-money {
+  font-size: 17px;
+  margin: 22px 0 2px;
+  color: var(--ts-muted);
+}
+
+.ts-money span {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-money-start { color: var(--ts-ink); }
+.ts-money-rule { color: var(--ts-rule); }
+.ts-money-hold { color: var(--ts-hold); }
+
+/* Motion. Short, and switched off for anyone who prefers less of it. */
+
+@keyframes ts-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes ts-grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.ts-rise {
+  animation: ts-rise .55s cubic-bezier(.2,.7,.2,1) both;
+  animation-delay: var(--delay, 0s);
 }

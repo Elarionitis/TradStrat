@@ -40,6 +40,9 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 - The dashboard was redesigned around five tabs: Results, Trades, Tune, Compare and Guide. It leads with the
   verdict, keeps advanced settings in one place, uses plain labels such as "Chance the edge is real", and its
   charts follow the light or dark theme.
+- Results read as a head-to-head between the rule and simply holding: growth, return for the risk, the worst
+  crash and a luck check, each with a winner, in the chart colors rather than alarm colors. Each verdict
+  explains what the result means, and the money line says what $10,000 became each way.
 - Verdicts name the asset, as in "Just holding SPY did better", and the dashboard says what buy and hold
   means next to the rule being tested.
 - Search and walk-forward results are cleared when any input changes, so they can never describe other

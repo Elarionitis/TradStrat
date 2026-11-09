@@ -40,9 +40,19 @@ def test_first_load_renders_results_without_errors(app: AppTest) -> None:
 def test_results_lead_with_a_verdict_against_buy_and_hold(app: AppTest) -> None:
     rendered = " ".join(str(element.proto) for element in app.get("html"))
 
-    assert "Return." in rendered
-    assert "Worst decline." in rendered
-    assert "buy and hold" in rendered.lower()
+    assert "Did the rule beat just holding" in rendered
+    for contest in ("Growth per year", "Return for the risk", "Worst crash", "Could it be luck?"):
+        assert contest in rendered
+    assert "became" in rendered
+
+
+def test_results_never_use_alarm_boxes(app: AppTest) -> None:
+    """A result is information, not an error, so it never appears as a red or yellow alert."""
+    for key in ("ma_crossover", "rsi", "macd"):
+        app.sidebar.selectbox[0].set_value(key).run()
+
+        assert not app.error
+        assert not app.warning
 
 
 @pytest.mark.parametrize(

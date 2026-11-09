@@ -50,11 +50,13 @@ from tradstrat.guide import guide_for
 from tradstrat.metrics import calendar_year_returns, rolling_sharpe
 from tradstrat.reporting import (
     METRIC_LABELS,
+    Round,
     Verdict,
     assess,
     assess_search,
     comparison_table,
     format_metric,
+    rounds,
 )
 from tradstrat.rules import EXAMPLES, RuleError, RuleStrategy, compile_rule
 from tradstrat.stats import BootstrapResult, bootstrap, probabilistic_sharpe_ratio
@@ -133,6 +135,9 @@ PALETTE: Final[dict[str, dict[str, str]]] = {
         "border": "#e1e0d9",
         "surface": "#ffffff",
         "accent": "#2a78d6",
+        "rule": "#2a78d6",
+        "hold": "#eb6834",
+        "surface-2": "#f5f4f0",
         "tip": "#1f1f1d",
         "tip-ink": "#f7f6f2",
     },
@@ -150,6 +155,9 @@ PALETTE: Final[dict[str, dict[str, str]]] = {
         "border": "#2c2c2a",
         "surface": "#171716",
         "accent": "#3987e5",
+        "rule": "#3987e5",
+        "hold": "#d95926",
+        "surface-2": "#1f1f1d",
         "tip": "#f0efec",
         "tip-ink": "#141413",
     },
@@ -267,7 +275,7 @@ def load_prices(inputs: Inputs) -> tuple[pd.DataFrame, str | None]:
 
 def inject_styles(theme: ChartTheme) -> None:
     colors = PALETTE[theme.name]
-    names = ("ink", "muted", "border", "surface", "accent", "tip", "tip-ink")
+    names = ("ink", "muted", "border", "surface", "surface-2", "accent", "rule", "hold", "tip", "tip-ink")
     variables = "".join(f"--ts-{name}:{colors[name]};" for name in names)
     tones = "".join(
         f".ts-tone-{tone}{{--tone:{colors[tone]};--wash:{colors[tone + '-wash']};}}"
@@ -296,30 +304,35 @@ def chart(figure: Any) -> None:
     st.plotly_chart(figure, theme=None, config={"displaylogo": False})
 
 
+EVIDENCE: Final[dict[str, tuple[str, str]]] = {
+    "good": ("rule", "Strong evidence"),
+    "warning": ("mixed", "Mixed evidence"),
+    "bad": ("hold", "Weak evidence"),
+    "neutral": ("mixed", "Note"),
+}
+
+
 def render_verdict(verdict: Verdict, seen: set[str] | None = None) -> None:
-    """A headline in the verdict's tone, followed by the findings behind it."""
+    """A calm card: how strong the evidence is, a headline, and the findings behind it.
+
+    Results are information, not errors, so the card never takes an alarm color. The tone shows only in a
+    small label and in each finding's mark.
+    """
     seen = set() if seen is None else seen
+    side, label = EVIDENCE[verdict.tone]
     findings = "".join(
         f'<div class="ts-finding ts-tone-{finding.tone}">'
         f'<span class="ts-mark">{TONE_MARKS[finding.tone]}</span>'
         f"<span><strong>{html.escape(finding.title)}.</strong> {rich(finding.detail, seen)}</span></div>"
         for finding in verdict.findings
-        if finding.tone != "neutral"
     )
-    # Neutral findings are context rather than a pass or a fail, so they sit under the grid as a note.
-    notes = " ".join(
-        f"<strong>{html.escape(finding.title)}.</strong> {rich(finding.detail, seen)}"
-        for finding in verdict.findings
-        if finding.tone == "neutral"
-    )
-    if notes:
-        findings += f'<div class="ts-muted ts-small ts-note">{notes}</div>'
     st.html(
-        f"""<div class="ts ts-tone-{verdict.tone}">
-  <div class="ts-verdict">
-    <div class="ts-badge">{TONE_MARKS[verdict.tone]}</div>
-    <div><div class="ts-headline">{html.escape(verdict.headline)}</div>
-      <div class="ts-muted">{rich(verdict.summary, seen)}</div></div>
+        f"""<div class="ts ts-answer ts-rise">
+  <div class="ts-answer-head">
+    <div class="ts-answer-title">
+      <span class="ts-pill ts-pill-{side}">{label}</span>{html.escape(verdict.headline)}
+    </div>
+    <p class="ts-takeaway">{rich(verdict.summary, seen)}</p>
   </div>
   <div class="ts-findings">{findings}</div>
 </div>"""
@@ -867,15 +880,114 @@ def render_kpis(result: BacktestResult) -> None:
         _metric(column, label, value, delta, chart_data=sparkline or None, chart_type=kind, help=explanation)
 
 
+def _bar(value: float, scale: float) -> float:
+    """Bar length as a percentage of the longer bar, for a value compared on its size."""
+    if math.isnan(value) or scale <= 0:
+        return 0.0
+    return max(2.0, min(100.0, abs(value) / scale * 100))
+
+
+def round_html(contest: Round, seen: set[str]) -> str:
+    """One round of the head-to-head: two bars, the values, and who won."""
+    values = (contest.rule, contest.hold)
+    defined = [abs(value) for value in values if not math.isnan(value)]
+    scale = max(defined) if defined else 0.0
+    if contest.metric != "max_drawdown":
+        # Growth and Sharpe are compared on the upside; a loss gets a stub rather than a long bar.
+        scale = max([value for value in values if not math.isnan(value) and value > 0], default=0.0)
+    rows = []
+    for side, value, name in (("rule", contest.rule, "Your rule"), ("hold", contest.hold, "Just holding")):
+        length = _bar(value, scale) if contest.metric == "max_drawdown" or value > 0 else 2.0
+        won = contest.winner == side
+        rows.append(
+            f'<div class="ts-bar-row{" ts-won" if won else ""}">'
+            f'<span class="ts-who">{name}</span>'
+            f'<span class="ts-bar"><i class="ts-fill-{side}" style="--w:{length:.1f}%"></i></span>'
+            f'<span class="ts-value">{html.escape(format_metric(contest.metric, value))}</span></div>'
+        )
+    hint = "Smaller is better." if contest.metric == "max_drawdown" else "Bigger is better."
+    winner = {"rule": "Your rule wins", "hold": "Holding wins", None: "No winner"}[contest.winner]
+    tip = html.escape(GLOSSARY[contest.term])
+    title = f'<span class="term" tabindex="0" data-tip="{tip}">{contest.title}</span>'
+    seen.add(contest.term)
+    return f"""<div class="ts-round">
+  <div class="ts-round-title">
+    {title}<span class="ts-round-winner ts-win-{contest.winner}">{winner}</span>
+  </div>
+  {"".join(rows)}
+  <div class="ts-hint">{hint}</div>
+</div>"""
+
+
+def luck_html(probability: float) -> str:
+    """How often the rule beat holding across reshuffled histories, against the 95% bar."""
+    if math.isnan(probability):
+        return ""
+    tip = html.escape(GLOSSARY["Block Bootstrap"])
+    passed = probability >= 0.95
+    status = "Passes" if passed else "Not yet"
+    return f"""<div class="ts-round ts-luck">
+  <div class="ts-round-title"><span class="term" tabindex="0" data-tip="{tip}">Could it be luck?</span>
+    <span class="ts-round-winner ts-win-{"rule" if passed else "None"}">{status}</span></div>
+  <div class="ts-meter"><i style="--w:{probability * 100:.1f}%"></i><b style="left:95%"></b></div>
+  <div class="ts-luck-scale"><span>0%</span><span class="ts-luck-mark">95% needed</span></div>
+  <div class="ts-hint">Beat holding in <strong>{probability:.0%}</strong> of 2,000 reshuffled histories.</div>
+</div>"""
+
+
+ANSWER_CHIPS: Final[dict[str, tuple[str, str]]] = {
+    "good": ("rule", "Your rule won"),
+    "warning": ("mixed", "Mixed result"),
+    "bad": ("hold", "Holding won"),
+    "neutral": ("mixed", "No result"),
+}
+
+
+def render_answer(result: BacktestResult, probability: float, asset: str) -> None:
+    """The verdict as a head-to-head between the rule and holding, in calm colors, with what it means."""
+    verdict = assess(result.metrics, result.benchmark_metrics, probability, asset)
+    contests = rounds(result.metrics, result.benchmark_metrics)
+    side, label = ANSWER_CHIPS[verdict.tone]
+    if verdict.tone == "warning" and all(contest.winner == "rule" for contest in contests[:2]):
+        side = "rule"
+    seen: set[str] = set()
+    metrics = result.metrics
+    activity = (
+        f"Invested {metrics.exposure:.0%} of the time, across {metrics.number_of_trades} "
+        f"trade{'s' if metrics.number_of_trades != 1 else ''}."
+    )
+    cards = "".join(round_html(contest, seen) for contest in contests) + luck_html(probability)
+    st.html(
+        f"""<div class="ts ts-answer ts-rise">
+  <div class="ts-answer-head">
+    <div class="ts-eyebrow">Did the rule beat just holding {html.escape(asset)}?</div>
+    <div class="ts-answer-title">
+      <span class="ts-pill ts-pill-{side}">{label}</span>{html.escape(verdict.headline)}
+    </div>
+    <p class="ts-takeaway">{rich(verdict.takeaway, seen)} <span class="ts-muted">{activity}</span></p>
+  </div>
+  <div class="ts-rounds">{cards}</div>
+</div>"""
+    )
+
+
 def render_results(
     result: BacktestResult, estimate: BootstrapResult | None, theme: ChartTheme, asset: str
 ) -> None:
     probability = estimate.probability_beats_benchmark if estimate else float("nan")
-    render_verdict(assess(result.metrics, result.benchmark_metrics, probability, asset))
-    st.space("small")
-    render_kpis(result)
+    render_answer(result, probability, asset)
 
     results = result.results
+    start = result.config.initial_capital
+    rule_end = float(results["Strategy Equity"].iloc[-1])
+    hold_end = float(results["Buy and Hold Benchmark"].iloc[-1])
+    st.html(
+        f"""<div class="ts ts-money ts-rise" style="--delay:.12s">
+  <span class="ts-money-start">${start:,.0f}</span> became
+  <span class="ts-money-rule">${rule_end:,.0f}</span> following the rule, and
+  <span class="ts-money-hold">${hold_end:,.0f}</span> just holding {html.escape(asset)}.
+</div>"""
+    )
     log_scale = st.toggle("Log scale", key="log_equity", help="Show equal percentage moves as equal heights.")
     chart(
         equity_figure(
@@ -888,9 +1000,11 @@ def render_results(
     with right:
         chart(annual_returns_figure(results["Strategy Equity"], results["Buy and Hold Benchmark"], theme))
 
-    render_luck(result, estimate, theme)
+    with st.expander("How sure can we be? The luck test in detail"):
+        render_luck(result, estimate, theme)
 
-    with st.expander("All metrics and more charts"):
+    with st.expander("Every number, and more charts"):
+        render_kpis(result)
         left, right = st.columns([3, 2], gap="large")
         with left:
             st.dataframe(
@@ -930,10 +1044,10 @@ def render_results(
 
 
 def render_luck(result: BacktestResult, estimate: BootstrapResult | None, theme: ChartTheme) -> None:
-    section(
-        "Could it be luck?",
+    prose(
         "A backtest is one version of history. TradStrat reshuffles it in 20-day blocks 2,000 times, a "
         "block bootstrap, to see how much the result could change by chance.",
+        muted=True,
     )
     if estimate is None:
         st.caption("At least 40 trading days are needed to estimate this.")

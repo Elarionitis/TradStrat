@@ -16,6 +16,7 @@ from tradstrat.reporting import (
     format_metric,
     overfitting_verdict,
     probability_verdict,
+    rounds,
 )
 
 
@@ -144,3 +145,32 @@ def test_search_verdict_needs_both_checks_to_pass(
     assert verdict.tone == tone
     assert headline in verdict.headline
     assert [finding.title for finding in verdict.findings] == ["Luck of the search", "Overfitting"]
+
+
+def test_rounds_name_the_winner_of_each_contest() -> None:
+    strategy = replace(BASE, cagr=0.05, sharpe_ratio=1.2, max_drawdown=-0.10)
+    benchmark = replace(BASE, cagr=0.08, sharpe_ratio=0.9, max_drawdown=-0.30)
+
+    contests = {contest.title: contest.winner for contest in rounds(strategy, benchmark)}
+
+    assert contests == {"Growth per year": "hold", "Return for the risk": "rule", "Worst crash": "rule"}
+
+
+def test_a_tie_goes_to_holding_and_an_undefined_value_to_no_one() -> None:
+    contests = rounds(replace(BASE, sharpe_ratio=float("nan")), BASE)
+
+    assert [contest.winner for contest in contests] == ["hold", None, "hold"]
+
+
+@pytest.mark.parametrize(
+    ("strategy", "probability"),
+    [
+        (replace(BASE, sharpe_ratio=1.2), 0.97),
+        (replace(BASE, sharpe_ratio=1.2), 0.70),
+        (replace(BASE, sharpe_ratio=0.5, max_drawdown=-0.10), 0.20),
+        (replace(BASE, sharpe_ratio=0.5, max_drawdown=-0.40), 0.20),
+        (replace(BASE, number_of_trades=0), float("nan")),
+    ],
+)
+def test_every_verdict_explains_what_it_means(strategy: Metrics, probability: float) -> None:
+    assert len(assess(strategy, BASE, probability).takeaway) > 80

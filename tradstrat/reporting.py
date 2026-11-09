@@ -110,6 +110,39 @@ class Verdict:
     headline: str
     summary: str
     findings: tuple[Finding, ...]
+    takeaway: str = ""
+
+
+@dataclass(frozen=True)
+class Round:
+    """One head-to-head comparison between the strategy and buy and hold.
+
+    ``winner`` is ``"rule"`` only when the strategy did strictly better, so a tie goes to holding, and is
+    ``None`` when either value is undefined.
+    """
+
+    title: str
+    term: str
+    metric: str
+    rule: float
+    hold: float
+    winner: str | None
+
+
+def rounds(strategy: Metrics, benchmark: Metrics) -> tuple[Round, ...]:
+    """Growth, return for the risk, and the worst crash: the three things a newcomer asks about."""
+    contests = (
+        ("Growth per year", "CAGR", "cagr"),
+        ("Return for the risk", "Sharpe Ratio", "sharpe_ratio"),
+        ("Worst crash", "Max Drawdown", "max_drawdown"),
+    )
+    results = []
+    for title, term, metric in contests:
+        rule, hold = getattr(strategy, metric), getattr(benchmark, metric)
+        tone = _compare(rule, hold)
+        winner = None if tone == "neutral" else "rule" if tone == "good" else "hold"
+        results.append(Round(title, term, metric, rule, hold, winner))
+    return tuple(results)
 
 
 def _compare(strategy: float, benchmark: float) -> Tone:
@@ -175,21 +208,45 @@ def assess(
         tone: Tone = "warning"
         headline = "The strategy never traded"
         summary = "No entry signal fired. Try a longer history or different parameters."
+        takeaway = (
+            "Its buy condition never came true in this stretch of history, so there is nothing to compare. "
+            "Try a longer history, another market or different settings."
+        )
     elif sharpe_tone == "good" and probability >= 0.95:
         tone, headline = "good", f"Beat just holding {asset}, and probably not by luck"
         summary = "The edge held up in at least 95% of resampled histories. Confirm it with walk-forward."
+        takeaway = (
+            "That is rare. Across thousands of reshuffled versions of this history it came out ahead at "
+            "least 95% of the time. The next step is the walk-forward test in the Tune tab, which checks the "
+            "idea on data it was never tuned on."
+        )
     elif sharpe_tone == "good":
         tone, headline = "warning", f"Beat just holding {asset}, but it could be luck"
         summary = "The risk-adjusted return was higher, but not consistently enough to rule out chance."
+        takeaway = (
+            "It earned more for the risk it took, but the lead was not consistent across reshuffled "
+            "histories, so luck can't be ruled out. A longer history, or the walk-forward test in the Tune "
+            "tab, would tell you more."
+        )
     elif drawdown_tone == "good":
         tone, headline = "warning", f"A smoother ride, but just holding {asset} did better"
         summary = (
             f"It cut the worst decline, but earned less per unit of risk than buying {asset} and holding it."
         )
+        takeaway = (
+            "The rule spent part of the time in cash, so it missed some of the gains but also some of the "
+            "falls. That trade can still be worth it for someone who would sell in a panic during a crash, "
+            "even though holding grew more."
+        )
     else:
         tone, headline = "bad", f"Just holding {asset} did better"
         summary = f"Buying {asset} and holding it earned more per unit of risk, with no deeper decline."
-    return Verdict(tone=tone, headline=headline, summary=summary, findings=tuple(findings))
+        takeaway = (
+            "Here, staying invested beat stepping in and out. That is the most common result for timing "
+            "rules, and a useful one: it is why most investors are told to simply hold. Try another market, "
+            "period or strategy to see where timing does help."
+        )
+    return Verdict(tone=tone, headline=headline, summary=summary, findings=tuple(findings), takeaway=takeaway)
 
 
 def assess_search(deflated_sharpe: float, overfitting: float) -> Verdict:
