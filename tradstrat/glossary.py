@@ -31,6 +31,8 @@ GLOSSARY: dict[str, str] = {
     "Information Ratio": "Return above the benchmark, divided by how much the strategy deviates from it.",
     "Look-Ahead Bias": "A mistake where a backtest uses information that would not have been available at the time.",
     "Moving Average": "The average closing price over the last so many trading days. It smooths out daily noise.",
+    "MACD": "Moving average convergence divergence: the gap between a fast and a slow exponential moving "
+    "average. Rising means the trend is speeding up.",
     "Max Drawdown": "The biggest fall from a high point to a later low: the worst loss you would have had to sit through.",
     "Max Drawdown Duration": "The longest stretch spent below a previous peak.",
     "Mean Reversion": "The idea that prices often move back toward their recent average after stretching away from it.",

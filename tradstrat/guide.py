@@ -142,6 +142,42 @@ GUIDES: dict[str, StrategyGuide] = {
             "otherwise."
         ),
     ),
+    "macd": StrategyGuide(
+        style="Trend following",
+        summary="Owns the asset while short-term momentum is stronger than its recent average.",
+        idea=(
+            "MACD, short for moving average convergence divergence, is the gap between a fast and a slow "
+            "exponential moving average. When that gap widens, the trend is speeding up. The signal line is "
+            "a smoothed copy of the gap, and MACD crossing above it is one of the most watched signals in "
+            "charting."
+        ),
+        buys="The MACD line rises above its signal line.",
+        sells="The MACD line falls below its signal line.",
+        works_when="Markets that move in sustained swings of a few weeks or more.",
+        struggles_when=(
+            "Quiet, sideways markets. It reacts to small wiggles, so it trades often and costs add up."
+        ),
+        rule=(
+            "Own {asset} while its MACD ({fast_window}-day minus {slow_window}-day exponential average) is "
+            "above its {signal_window}-day signal line, and hold cash otherwise."
+        ),
+    ),
+    "trend_filter": StrategyGuide(
+        style="Trend following",
+        summary="Owns the asset while its price is above its long-term average, and steps aside below it.",
+        idea=(
+            "The simplest trend rule there is, and one of the best known. Prices tend to stay above their "
+            "200-day average in bull markets and fall below it in bear markets, so the average works as a "
+            "filter. Mebane Faber's 2007 study of a similar monthly rule made it famous."
+        ),
+        buys="The price closes above its moving average.",
+        sells="The price closes below its moving average.",
+        works_when="Long bear markets, such as 2008, which it mostly sits out.",
+        struggles_when=(
+            "Sharp drops that recover quickly, where it sells near the bottom and buys back higher."
+        ),
+        rule="Own {asset} while its price is above its {window}-day average price, and hold cash otherwise.",
+    ),
 }
 
 

@@ -126,8 +126,9 @@ The whole study is reproduced by `python scripts/run_research.py`.
 - Probability of backtest overfitting, by combinatorially symmetric cross-validation
 - Walk-forward optimization, in sliding or anchored mode
 
-**Five strategies, and your own**
-- Moving average crossover, z-score mean reversion, RSI reversal, Donchian breakout, time-series momentum
+**Seven strategies, and your own**
+- Moving average crossover, 200-day trend filter, MACD crossover, Donchian breakout, time-series momentum,
+  z-score mean reversion and RSI reversal
 - A small rule language for testing an idea without writing code, whose every number can be tuned
 - A registry that gives a new strategy the dashboard, CLI, optimizer and look-ahead tests with no extra code
 

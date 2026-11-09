@@ -11,7 +11,7 @@ import pytest
 from conftest import make_bars, random_walk
 
 from tradstrat.engine import BacktestConfig, run_backtest
-from tradstrat.strategies import create_strategy
+from tradstrat.strategies import STRATEGIES, create_strategy
 from tradstrat.validation import OBJECTIVES, build_grid, compare_strategies, grid_search, walk_forward
 
 GRID = [
@@ -269,14 +269,7 @@ def test_walk_forward_sharpe_is_measured_above_the_cash_rate() -> None:
 def test_comparison_runs_every_strategy_and_buy_and_hold(walk: pd.DataFrame) -> None:
     comparison = compare_strategies(walk)
 
-    assert set(comparison.table["Strategy"]) == {
-        "Moving Average Crossover",
-        "Mean Reversion (Z-Score)",
-        "RSI Reversal",
-        "Donchian Breakout",
-        "Time-Series Momentum",
-        "Buy and Hold",
-    }
+    assert set(comparison.table["Strategy"]) == {cls.label for cls in STRATEGIES.values()}
     assert list(comparison.equity.columns)[-1] == "Buy and Hold"
     assert comparison.table["sharpe_ratio"].is_monotonic_decreasing
 

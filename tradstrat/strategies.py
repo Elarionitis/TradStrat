@@ -365,6 +365,88 @@ class MomentumStrategy(Strategy):
         )
 
 
+@register
+@dataclass(frozen=True)
+class MacdStrategy(Strategy):
+    """Trend following: long while the MACD line is above its signal line."""
+
+    fast_window: int = 12
+    slow_window: int = 26
+    signal_window: int = 9
+
+    key: ClassVar[str] = "macd"
+    label: ClassVar[str] = "MACD Crossover"
+    description: ClassVar[str] = "Long while the MACD line is above its signal line."
+    params: ClassVar[tuple[ParamSpec, ...]] = (
+        ParamSpec(
+            "fast_window", "Fast Average", 12, 5, 20, 1, "Trading days in the fast exponential average."
+        ),
+        ParamSpec(
+            "slow_window", "Slow Average", 26, 20, 60, 2, "Trading days in the slow exponential average."
+        ),
+        ParamSpec(
+            "signal_window",
+            "Signal Line",
+            9,
+            3,
+            15,
+            1,
+            "Trading days used to smooth the MACD into its signal.",
+        ),
+    )
+
+    def __post_init__(self) -> None:
+        if min(self.fast_window, self.slow_window, self.signal_window) <= 1:
+            raise ValueError("MACD windows must be greater than 1.")
+        if self.fast_window >= self.slow_window:
+            raise ValueError("The fast average must be shorter than the slow average.")
+
+    @property
+    def warmup(self) -> int:
+        return self.slow_window + self.signal_window
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        close = data["Close"]
+        fast = close.ewm(span=self.fast_window, adjust=False, min_periods=self.fast_window).mean()
+        slow = close.ewm(span=self.slow_window, adjust=False, min_periods=self.slow_window).mean()
+        macd = fast - slow
+        # The signal line starts only once it has averaged a full window of defined MACD values.
+        signal_line = macd.ewm(span=self.signal_window, adjust=False, min_periods=self.signal_window).mean()
+        return pd.DataFrame(
+            {"signal": (macd > signal_line).astype(int), "macd": macd, "signal_line": signal_line},
+            index=data.index,
+        )
+
+
+@register
+@dataclass(frozen=True)
+class TrendFilterStrategy(Strategy):
+    """Trend following: long while the close is above its long-term moving average."""
+
+    window: int = 200
+
+    key: ClassVar[str] = "trend_filter"
+    label: ClassVar[str] = "Trend Filter"
+    description: ClassVar[str] = "Long while the close is above its long-term moving average."
+    params: ClassVar[tuple[ParamSpec, ...]] = (
+        ParamSpec("window", "Average Window", 200, 50, 300, 10, "Trading days in the moving average."),
+    )
+    overlays: ClassVar[tuple[tuple[str, str], ...]] = (("average", "Moving average"),)
+
+    def __post_init__(self) -> None:
+        if self.window <= 1:
+            raise ValueError("The moving average window must be greater than 1.")
+
+    @property
+    def warmup(self) -> int:
+        return self.window
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        close = data["Close"]
+        average = close.rolling(self.window, min_periods=self.window).mean()
+        return pd.DataFrame({"signal": (close > average).astype(int), "average": average}, index=data.index)
+
+
 def indicator_overlays(strategy: Strategy, data: pd.DataFrame) -> pd.DataFrame | None:
     """The strategy's price-scale indicators, labeled for display, or None if it has none."""
     if not strategy.overlays:

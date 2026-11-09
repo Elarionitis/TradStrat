@@ -9,6 +9,8 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 - **Custom rules without code.** A small rule language, such as `close crosses above sma(200)`, in the
   dashboard and through `--buy` and `--sell` on the command line. Every number in a rule can be tuned by the
   optimizer and walk-forward validation, and custom rules appear in the strategy comparison.
+- **Two more classic strategies:** MACD crossover, and the 200-day trend filter made famous by Mebane
+  Faber's study of tactical asset allocation.
 - **The latest signal.** The dashboard shows whether the rule would own the asset or hold cash at the latest
   close, and since when.
 - **Shareable links.** The address bar holds the market, history and strategy, so a link reopens the same test.

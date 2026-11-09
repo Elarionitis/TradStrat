@@ -74,7 +74,7 @@ LIGHT: Final[ChartTheme] = ChartTheme(
     grid="#e1e0d9",
     axis="#c3c2b7",
     hover_background="#ffffff",
-    series=("#2a78d6", "#1baf7a", "#eda100", "#e87ba4", "#6250d6"),
+    series=("#2a78d6", "#1baf7a", "#eda100", "#e87ba4", "#6250d6", "#008300", "#e34948"),
 )
 DARK: Final[ChartTheme] = ChartTheme(
     name="dark",
@@ -91,7 +91,7 @@ DARK: Final[ChartTheme] = ChartTheme(
     grid="#2c2c2a",
     axis="#383835",
     hover_background="#1a1a19",
-    series=("#3987e5", "#199e70", "#c98500", "#d55181", "#9085e9"),
+    series=("#3987e5", "#199e70", "#c98500", "#d55181", "#9085e9", "#008300", "#e66767"),
 )
 
 

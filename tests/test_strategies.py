@@ -14,10 +14,12 @@ from tradstrat.strategies import (
     STRATEGIES,
     BuyAndHoldStrategy,
     DonchianBreakoutStrategy,
+    MacdStrategy,
     MeanReversionStrategy,
     MomentumStrategy,
     MovingAverageCrossoverStrategy,
     RsiStrategy,
+    TrendFilterStrategy,
     create_strategy,
     latest_signal,
     relative_strength_index,
@@ -120,6 +122,9 @@ def test_param_grid_stays_inside_the_declared_range() -> None:
         (RsiStrategy, {"oversold": 60.0, "exit_level": 50.0}),
         (DonchianBreakoutStrategy, {"entry_window": 10, "exit_window": 20}),
         (MomentumStrategy, {"lookback_window": 0}),
+        (MacdStrategy, {"fast_window": 30, "slow_window": 26}),
+        (MacdStrategy, {"signal_window": 1}),
+        (TrendFilterStrategy, {"window": 1}),
     ],
 )
 def test_invalid_parameters_fail_on_construction(cls: type, kwargs: dict[str, float]) -> None:
@@ -201,3 +206,26 @@ def test_latest_signal_has_no_start_when_it_never_changed() -> None:
 
     assert signal.long
     assert signal.since is None
+
+
+def test_macd_is_long_exactly_when_macd_is_above_its_signal_line() -> None:
+    data = random_walk(400)
+    close = data["Close"]
+    macd = (
+        close.ewm(span=12, adjust=False, min_periods=12).mean()
+        - close.ewm(span=26, adjust=False, min_periods=26).mean()
+    )
+    signal_line = macd.ewm(span=9, adjust=False, min_periods=9).mean()
+
+    signals = MacdStrategy().generate_signals(data)
+
+    np.testing.assert_array_equal(signals["signal"], (macd > signal_line).astype(int))
+    assert signals["signal"].iloc[: 26 + 9 - 2].eq(0).all()
+
+
+def test_trend_filter_matches_the_same_rule_written_by_hand() -> None:
+    data = random_walk(500)
+
+    expected = create_strategy(compile_rule("close > sma(100)")).generate_signals(data)["signal"]
+
+    np.testing.assert_array_equal(TrendFilterStrategy(100).generate_signals(data)["signal"], expected)

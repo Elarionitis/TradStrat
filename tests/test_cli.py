@@ -14,7 +14,7 @@ def test_list_shows_every_strategy(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["list"]) == 0
 
     output = capsys.readouterr().out
-    for key in ("ma_crossover", "mean_reversion", "rsi", "donchian", "momentum"):
+    for key in ("ma_crossover", "mean_reversion", "rsi", "donchian", "momentum", "macd", "trend_filter"):
         assert key in output
 
 

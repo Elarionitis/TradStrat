@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from tradstrat.strategies import STRATEGIES
+
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
 TABS = ["Results", "Trades", "Tune", "Compare", "Guide"]
 
@@ -43,7 +45,9 @@ def test_results_lead_with_a_verdict_against_buy_and_hold(app: AppTest) -> None:
     assert "buy and hold" in rendered.lower()
 
 
-@pytest.mark.parametrize("key", ["ma_crossover", "mean_reversion", "rsi", "donchian", "momentum"])
+@pytest.mark.parametrize(
+    "key", ["ma_crossover", "mean_reversion", "rsi", "donchian", "momentum", "macd", "trend_filter"]
+)
 def test_each_strategy_renders(app: AppTest, key: str) -> None:
     app.sidebar.selectbox[0].set_value(key).run()
 
@@ -163,7 +167,7 @@ def test_every_strategy_is_explained_in_the_guide(app: AppTest) -> None:
 
     for phrase in ("Buys when", "Sells when", "Tends to struggle in"):
         assert phrase in rendered
-    assert len([item for item in app.expander if "·" in item.label]) == 6
+    assert len([item for item in app.expander if "·" in item.label]) == len(STRATEGIES)
 
 
 def rendered(app: AppTest) -> str:
