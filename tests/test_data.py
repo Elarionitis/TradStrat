@@ -340,6 +340,23 @@ def test_yfinance_is_asked_for_unadjusted_prices(monkeypatch: pytest.MonkeyPatch
     assert captured["auto_adjust"] is False
 
 
+def test_all_history_does_not_start_at_the_epoch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """yfinance treats a start of timestamp 0 as missing and returns only a month, so it is moved a day on."""
+    captured: dict = {}
+
+    def fake_download(ticker: str, **kwargs: object) -> pd.DataFrame:
+        captured.update(kwargs)
+        return bars()
+
+    monkeypatch.setattr(data_module.yf, "download", fake_download)
+
+    _fetch_yfinance("BTC-USD", "1970-01-01", "2026-01-01")
+    assert captured["start"] == "1970-01-02"
+
+    _fetch_yfinance("BTC-USD", "2020-03-04", "2026-01-01")
+    assert captured["start"] == "2020-03-04"
+
+
 def test_unrecognized_multiindex_columns_are_rejected() -> None:
     frame = bars()
     frame.columns = pd.MultiIndex.from_product([["AAPL"], list("abcde")])

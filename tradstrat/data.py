@@ -167,11 +167,16 @@ def load_sample() -> pd.DataFrame:
     return load_csv(SAMPLE_PATH)
 
 
+# yfinance reads a start of exactly the Unix epoch, timestamp 0, as "no start" and returns only its default
+# month of history, so "all history" requests start a day later instead.
+YFINANCE_EARLIEST: Final = pd.Timestamp("1970-01-02")
+
+
 def _fetch_yfinance(ticker: str, start: str, end: str) -> pd.DataFrame:
     """Fetch OHLCV rows through yfinance."""
     return yf.download(
         ticker,
-        start=start,
+        start=max(pd.Timestamp(start), YFINANCE_EARLIEST).strftime("%Y-%m-%d"),
         end=end,
         interval="1d",
         auto_adjust=False,
