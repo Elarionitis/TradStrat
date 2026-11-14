@@ -388,8 +388,8 @@ class RuleStrategy(Strategy):
                 defined = ~(np.isnan(left) | np.isnan(right))
                 previous = np.concatenate([[False], (before_opposite & defined)[:-1]])
                 results.append(now & previous)
-        combine = np.logical_and if condition.joiner == "and" else np.logical_or
-        return combine.reduce(results)
+        stacked = np.stack(results)
+        return np.all(stacked, axis=0) if condition.joiner == "and" else np.any(stacked, axis=0)
 
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
         buy = self._evaluate(self.rule.buy, data)

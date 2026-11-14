@@ -66,7 +66,11 @@ dependencies = { file = ["requirements.txt"] }
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # yfinance's cache (via peewee) leaves sqlite connections open; Python 3.13+ warns about it.
+    "ignore:unclosed database in <sqlite3.Connection:ResourceWarning",
+]
 
 [tool.coverage.run]
 source = ["tradstrat"]

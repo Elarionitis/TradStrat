@@ -196,8 +196,8 @@ MUTATIONS = [
     ),
     (
         "rules.py",
-        'combine = np.logical_and if condition.joiner == "and" else np.logical_or',
-        'combine = np.logical_or if condition.joiner == "and" else np.logical_and',
+        'return np.all(stacked, axis=0) if condition.joiner == "and" else np.any(stacked, axis=0)',
+        'return np.any(stacked, axis=0) if condition.joiner == "and" else np.all(stacked, axis=0)',
         "A rule mixes up 'and' and 'or'",
     ),
     (
