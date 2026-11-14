@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import tomllib
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from streamlit.proto.NewSession_pb2 import CustomThemeConfig
 from streamlit.runtime.theme_util import parse_fonts_with_source
 from streamlit.testing.v1 import AppTest
 
+import tradstrat
+import tradstrat.charts as charts_module
 import tradstrat.data as data_module
 from tradstrat.data import load_sample
 from tradstrat.strategies import STRATEGIES
@@ -49,6 +52,23 @@ def test_first_load_renders_results_without_errors(app: AppTest) -> None:
     assert not app.error
     assert [tab.label for tab in app.tabs] == TABS
     assert metric_labels(app) >= {"Total return", "Annual return", "Sharpe ratio", "Max drawdown"}
+
+
+def test_a_package_changed_since_import_is_reloaded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression guard: Streamlit Cloud pulls new code without a restart, which once broke the live site."""
+    loaded = {name: module for name, module in sys.modules.items() if name.partition(".")[0] == "tradstrat"}
+    monkeypatch.setattr(tradstrat, "LOADED_AT", 0.0)
+    monkeypatch.delattr(charts_module, "crashes_figure")
+    try:
+        test = AppTest.from_file(APP, default_timeout=90)
+        test.session_state["source"] = "Sample"
+        test.session_state["started"] = True
+        test.run()
+
+        assert not test.exception
+        assert sys.modules["tradstrat"] is not tradstrat
+    finally:
+        sys.modules.update(loaded)
 
 
 def test_results_lead_with_a_verdict_against_buy_and_hold(app: AppTest) -> None:

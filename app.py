@@ -11,9 +11,29 @@ import html
 import io
 import math
 import re
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
+
+
+def _forget_stale_package() -> None:
+    """Drop ``tradstrat`` from memory if its files changed after it was imported.
+
+    Streamlit Cloud pulls new commits into a running server without restarting it. The page reruns with the
+    new ``app.py``, but Python keeps the package imported before the pull, so a name added since then fails
+    to import. Forgetting the package makes the imports below load the new files.
+    """
+    loaded = sys.modules.get("tradstrat")
+    if loaded is None:
+        return
+    newest = max(path.stat().st_mtime for path in Path(__file__).with_name("tradstrat").glob("*.py"))
+    if newest > getattr(loaded, "LOADED_AT", newest):
+        for name in [name for name in sys.modules if name.partition(".")[0] == "tradstrat"]:
+            del sys.modules[name]
+
+
+_forget_stale_package()
 
 import numpy as np
 import pandas as pd
