@@ -40,6 +40,11 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 
 ### Changed
 
+- A new look for the dashboard and the HTML report, in the style of a research note: a serif for headlines,
+  a plain sans for reading, mono for figures, warm paper and ink colors, and hairline rules in place of
+  floating cards. The landing illustration is drawn from a real trend rule on simulated prices, and the
+  questions read as a numbered index. "All questions" leads back from any result.
+
 - Ready to run as a public website: friendly messages instead of raw errors when prices can't be loaded,
   with a one-click switch to demo data; size limits on every cache, rule and upload; no tracebacks shown to
   visitors; and a Dockerfile with a health check.
