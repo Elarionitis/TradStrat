@@ -8,7 +8,19 @@ from typing import Final, Literal
 
 import pandas as pd
 
+from tradstrat.engine import BacktestResult
 from tradstrat.metrics import Metrics
+from tradstrat.strategies import Strategy
+from tradstrat.stress import (
+    BestTradesResult,
+    CostResult,
+    Crash,
+    StartDateResult,
+    cost_test,
+    crash_test,
+    start_date_test,
+    without_best_trades,
+)
 
 Tone = Literal["good", "warning", "bad", "neutral"]
 
@@ -315,4 +327,186 @@ def assess_search(deflated_sharpe: float, overfitting: float) -> Verdict:
         "No clear edge over buy and hold",
         "The best settings did not beat buy and hold by more than trying many settings would explain.",
         findings,
+    )
+
+
+@dataclass(frozen=True)
+class StressCheck:
+    """One question to ask before trusting a backtest, with TradStrat's answer for this one."""
+
+    question: str
+    tone: Tone
+    status: str
+    answer: str
+    computed: bool = True
+
+
+def _sentence(text: str) -> str:
+    """Capitalize the first letter, for a name that opens a sentence, such as "the synthetic sample"."""
+    return text[:1].upper() + text[1:]
+
+
+def _pct(value: float) -> str:
+    return "n/a" if math.isnan(value) else f"{value:.1%}"
+
+
+def hindsight_check(asset: str) -> StressCheck:
+    return StressCheck(
+        "Was the market picked with hindsight?",
+        "neutral",
+        "Your call",
+        "TradStrat tests one market at a time, so there is no stock list that quietly drops the companies "
+        f"that failed. But if you chose {asset} because you already know it went up, that knowledge is built "
+        "into the result. Try the same rule on a market you did not pick for its past.",
+        computed=False,
+    )
+
+
+def fills_check() -> StressCheck:
+    return StressCheck(
+        "Are the fills realistic?",
+        "good",
+        "Built in",
+        "Every trade fills at the next day's opening price, never at the price that triggered it, and pays "
+        "slippage. When the price gaps through a stop, the fill is the worse opening price. These are daily "
+        "prices, so the test suits trades held for days or longer, not day trading or options.",
+        computed=False,
+    )
+
+
+def cost_check(costs: CostResult) -> StressCheck:
+    question = "Are all the costs included?"
+    if costs.free:
+        return StressCheck(
+            question,
+            "bad",
+            "Costs are off",
+            "Commission and slippage are set to zero, so this result is kinder than real trading would be. "
+            "Put realistic costs back under Advanced settings.",
+        )
+    answer = (
+        f"Every buy and sell pays {costs.commission_rate:.2%} commission and {costs.slippage_bps:g} basis "
+        "points of slippage, and holding pays the same. With both doubled, the rule makes "
+        f"{_pct(costs.doubled_cagr)} a year, against {_pct(costs.doubled_hold_cagr)} just holding."
+    )
+    leads = costs.cagr > costs.hold_cagr
+    if leads and not costs.doubled_cagr > costs.doubled_hold_cagr:
+        return StressCheck(question, "bad", "Fragile", answer + " Doubling costs is enough to lose its lead.")
+    if costs.cagr - costs.doubled_cagr > 0.01:
+        return StressCheck(question, "warning", "Costs bite", answer + " It trades often enough to feel it.")
+    return StressCheck(question, "good", "Small effect", answer)
+
+
+def start_date_check(test: StartDateResult | None) -> StressCheck:
+    question = "Does it depend on the start date?"
+    if test is None:
+        return StressCheck(
+            question,
+            "neutral",
+            "Too short",
+            "Comparing start dates needs at least two and a half years of history. Choose a longer history.",
+        )
+    share, worst, count = test.share_beating, test.worst, len(test.windows)
+    answer = (
+        f"Over {count} windows of {test.years} year{'s' if test.years != 1 else ''}, each starting in a "
+        f"different month, the rule beat just holding in {share:.0%} of them. Its worst start, "
+        f"{worst['Start']:%B %Y}, made {_pct(worst['Rule'])} a year, against {_pct(worst['Hold'])} holding."
+    )
+    if share >= 0.75:
+        return StressCheck(question, "good", "Steady", answer)
+    if share >= 0.4:
+        return StressCheck(question, "warning", "Depends on timing", answer)
+    return StressCheck(question, "bad", "Rarely beats holding", answer)
+
+
+def best_trades_check(test: BestTradesResult | None) -> StressCheck:
+    if test is None:
+        return StressCheck(
+            "Does it still work without its best trades?", "neutral", "No trades", "The rule never traded."
+        )
+    question = f"Does it still work without its {test.removed} best trade{'s' if test.removed != 1 else ''}?"
+    if test.trades <= test.removed:
+        return StressCheck(
+            question,
+            "warning",
+            "Too few trades",
+            f"The rule made only {test.trades} trade{'s' if test.trades != 1 else ''}, so the whole result "
+            "rests on a handful of decisions. Without them the money would only have earned the cash rate. "
+            "A longer history would give it more chances to prove itself.",
+        )
+    answer = (
+        f"Without its {test.removed} best trades, out of {test.trades}, the rule makes "
+        f"{_pct(test.cagr_without)} a year instead of {_pct(test.cagr)}. Just holding made "
+        f"{_pct(test.hold_cagr)}."
+    )
+    if not math.isnan(test.share_of_profit):
+        answer += f" Those {test.removed} trades brought in {test.share_of_profit:.0%} of its profit."
+    if test.cagr_without > test.hold_cagr:
+        return StressCheck(question, "good", "Holds up", answer)
+    if test.cagr_without > 0:
+        return StressCheck(question, "warning", "Leans on a few", answer)
+    return StressCheck(question, "bad", "Carried by a few", answer)
+
+
+def crash_check(crashes: list[Crash], asset: str) -> StressCheck:
+    question = "Did it survive a real bear market?"
+    if not crashes:
+        return StressCheck(
+            question,
+            "warning",
+            "No crash in view",
+            f"{_sentence(asset)} never fell 20% or more in this history, so it cannot show how the rule "
+            "copes with a crash. Choose a longer history that includes one, such as 2008 or 2022.",
+        )
+    fewer = sum(crash.rule_lost_less for crash in crashes)
+    times = "once" if len(crashes) == 1 else "twice" if len(crashes) == 2 else f"{len(crashes)} times"
+    answer = (
+        f"{_sentence(asset)} fell 20% or more {times} in this history, and the rule lost less than "
+        f"holding in {fewer} of {'it' if len(crashes) == 1 else 'them'}. "
+        + " ".join(f"{crash.name}: rule {crash.rule:.0%}, holding {crash.hold:.0%}." for crash in crashes)
+    )
+    if fewer == len(crashes):
+        return StressCheck(question, "good", "Held up", answer)
+    if fewer * 2 >= len(crashes):
+        return StressCheck(question, "warning", "Mixed", answer)
+    return StressCheck(question, "bad", "Fell with it", answer)
+
+
+def stress_checks(
+    asset: str,
+    costs: CostResult,
+    start_dates: StartDateResult | None,
+    best_trades: BestTradesResult | None,
+    crashes: list[Crash],
+) -> tuple[StressCheck, ...]:
+    """The six questions worth asking of any backtest, answered for this one, in a fixed order."""
+    return (
+        hindsight_check(asset),
+        fills_check(),
+        cost_check(costs),
+        start_date_check(start_dates),
+        best_trades_check(best_trades),
+        crash_check(crashes, asset),
+    )
+
+
+def stress_summary(checks: tuple[StressCheck, ...]) -> str:
+    """One line on how many of the computed checks passed."""
+    computed = [check for check in checks if check.computed and check.tone != "neutral"]
+    passed = sum(check.tone == "good" for check in computed)
+    if not computed:
+        return "Not enough history to stress-test this rule."
+    return f"Passed {passed} of {len(computed)} stress tests."
+
+
+def stress_test(
+    data: pd.DataFrame, strategy: Strategy, result: BacktestResult, asset: str
+) -> tuple[StressCheck, ...]:
+    """Run every stress test on a finished backtest and answer the six questions."""
+    return stress_checks(
+        asset,
+        cost_test(data, strategy, result),
+        start_date_test(data, strategy, result.config),
+        without_best_trades(result),
+        crash_test(result),
     )

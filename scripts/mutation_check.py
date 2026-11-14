@@ -206,6 +206,30 @@ MUTATIONS = [
         "signal.index[different[-1]]",
         "The latest signal's start date is a day early",
     ),
+    (
+        "stress.py",
+        'windows["Beat"] = windows["Rule"] > windows["Hold"]',
+        'windows["Beat"] = windows["Rule"] >= windows["Hold"]',
+        "A tie with holding counts as beating it",
+    ),
+    (
+        "stress.py",
+        "window = data.iloc[:end]",
+        "window = data",
+        "A start-date window runs past its end date",
+    ),
+    (
+        "stress.py",
+        'best = trades.nlargest(removed, "Return")',
+        'best = trades.nsmallest(removed, "Return")',
+        "The worst trades are removed instead of the best",
+    ),
+    (
+        "stress.py",
+        "return self.rule > self.hold",
+        "return self.rule < self.hold",
+        "A crash counts as softened when the rule lost more",
+    ),
 ]
 
 

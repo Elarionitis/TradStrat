@@ -152,6 +152,41 @@ to choose, and the result does not depend on one lucky split.
 Ties share the average rank, and a configuration that never traded has an undefined Sharpe ratio and ranks
 last. The calculation is vectorized from per-block sums, so all 12,870 splits take well under a second.
 
+## Stress Tests
+
+A backtest is one path through one stretch of history, with one set of costs. The stress test reruns a
+finished backtest after changing one of those, and asks whether the result survives. It answers six questions
+that are often asked of backtests shared online, in a fixed order. Two are answered by how TradStrat works,
+and four by computation.
+
+1. **Was the market picked with hindsight?** TradStrat tests one asset at a time, so there is no
+   constituent list to suffer from survivorship bias. Choosing an asset because of how it later performed is
+   still hindsight, and no computation can detect it, so the answer says so.
+2. **Are the fills realistic?** Fills happen at the next bar's open with slippage, and a stop that the market
+   gaps through fills at the open (see Execution Model). Daily bars cannot model intraday quotes, which matters
+   for day trading and options, so the answer says so.
+3. **Are all the costs included?** The backtest is rerun with commission and slippage doubled, for both the
+   rule and holding. The answer warns when doubling costs costs the rule its lead over holding, or more than one
+   percentage point of growth a year. Zero costs are flagged as unrealistic.
+4. **Does it depend on the start date?** The rule and holding run over windows of equal length (half the
+   history, at most five years), starting on the first trading day of each month. Indicators are computed once
+   on the full history, which uses no future data because every strategy is causal, so each window starts with
+   its indicators warmed up, as a trader starting that month would have had them. Long histories are sampled
+   down to 120 evenly spaced windows. The answer reports the share of windows in which the rule grew faster
+   than holding (steady from 75%, rarely beats holding below 40%), and the worst start for the rule.
+5. **Does it still work without its best trades?** The 5 trades with the highest return are removed by
+   replacing the strategy's return on every day from each one's entry to its exit with the cash rate, as if
+   the money had stayed in cash. Every other day is left exactly as it was. The answer compares the resulting
+   growth with holding, and reports the share of the rule's profit those trades brought in. A rule with 5
+   trades or fewer is flagged, since its whole result rests on a handful of decisions.
+6. **Did it survive a real bear market?** The deepest non-overlapping falls of at least 20% in the
+   buy-and-hold equity curve are found, up to four, each measured from its peak to its bottom. A fall is
+   blocked from its peak until the price regains that peak, so the next one found is a separate episode. Falls
+   whose bottom lies in a well-known crisis are named after it. The answer counts the falls in which the rule
+   lost less than holding, and warns when the history holds no fall of 20%.
+
+The summary counts the four computed checks that pass, leaving out any that the history is too short to run.
+
 ## Verdict
 
 The dashboard, command line and HTML report share one rule for their headline:
