@@ -243,19 +243,19 @@ def write_report(path: str | Path, html_text: str) -> Path:
 STYLES: Final[str] = """
 :root {
   color-scheme: light;
-  --page: #f9f9f7;
-  --surface: #fcfcfb;
-  --ink: #0b0b0b;
-  --secondary: #52514e;
-  --muted: #898781;
-  --hairline: #e1e0d9;
+  --page: #f6f3ec;
+  --surface: #fbf9f4;
+  --ink: #16140f;
+  --secondary: #615d53;
+  --muted: #8a8478;
+  --hairline: #dcd6c8;
   --good: #006300;
   --good-wash: #e7f4e7;
   --warning: #8a5a00;
   --warning-wash: #fdf3dc;
   --bad: #b42b2b;
   --bad-wash: #fbe9e9;
-  --neutral-wash: #f0efec;
+  --neutral-wash: #ece8de;
   --accent: #2a78d6;
 }
 * { box-sizing: border-box; }
@@ -263,41 +263,39 @@ body {
   margin: 0;
   background: var(--page);
   color: var(--ink);
-  font: 15px/1.55 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 15px/1.6 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
+h1, h2, .verdict strong { font-family: Newsreader, Georgia, "Times New Roman", serif; font-weight: 600; }
+.mono, .kpi-value, table { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
 main { max-width: 1120px; margin: 0 auto; padding: 40px 16px 64px; }
 header { margin-bottom: 24px; }
-.eyebrow { color: var(--accent); font-weight: 600; font-size: 13px; letter-spacing: .04em;
-  text-transform: uppercase; }
-h1 { font-size: 32px; line-height: 1.2; margin: 6px 0 4px; letter-spacing: -.01em; }
-h2 { font-size: 20px; margin: 0 0 2px; }
+.eyebrow { color: var(--accent); font: 500 12px "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  letter-spacing: .08em; text-transform: uppercase; }
+h1 { font-size: 38px; line-height: 1.1; margin: 8px 0 6px; letter-spacing: -.02em; }
+h2 { font-size: 24px; margin: 0 0 4px; }
 h3 { font-size: 16px; margin: 28px 0 10px; }
 .period { color: var(--secondary); margin: 0; }
-.verdict { display: flex; gap: 14px; align-items: flex-start; padding: 18px 20px; border-radius: 12px;
-  border: 1px solid var(--hairline); background: var(--neutral-wash); }
+.verdict { display: flex; gap: 14px; align-items: flex-start; padding: 18px 0 6px;
+  border-top: 2px solid var(--ink); }
 .verdict p { margin: 0; color: var(--secondary); }
-.verdict-icon { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid;
+.verdict-icon { flex: none; width: 28px; height: 28px; border-radius: 4px; display: grid;
   place-items: center; font-weight: 700; color: #fff; background: var(--muted); }
-.verdict.good { background: var(--good-wash); } .verdict.good .verdict-icon { background: var(--good); }
-.verdict.warning { background: var(--warning-wash); }
-.verdict.warning .verdict-icon { background: var(--warning); }
-.verdict.bad { background: var(--bad-wash); } .verdict.bad .verdict-icon { background: var(--bad); }
+.verdict.good .verdict-icon { background: var(--accent); }
 .findings { list-style: none; padding: 0; margin: 14px 0 0; display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px 20px; }
 .finding { display: flex; gap: 10px; color: var(--secondary); }
 .finding .icon { flex: none; width: 20px; text-align: center; font-weight: 700; }
-.finding.good .icon { color: var(--good); } .finding.bad .icon { color: var(--bad); }
+.finding.good .icon { color: var(--accent); } .finding.bad .icon { color: var(--muted); }
 .finding.warning .icon { color: var(--warning); } .finding.neutral .icon { color: var(--muted); }
 .finding strong { color: var(--ink); }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;
   margin: 24px 0; }
-.kpi { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
-  padding: 14px 16px; }
+.kpi { border-top: 1px solid var(--hairline); padding: 14px 0 4px; }
 .kpi-label { color: var(--secondary); font-size: 13px; }
-.kpi-value { font-size: 28px; font-weight: 600; letter-spacing: -.01em; }
+.kpi-value { font-size: 26px; font-weight: 500; }
 .kpi-compare { color: var(--muted); font-size: 13px; }
 .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.chart { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
+.chart { background: var(--surface); border: 1px solid var(--hairline); border-radius: 6px;
   padding: 8px; min-width: 0; }
 .chart.wide { grid-column: 1 / -1; }
 .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
