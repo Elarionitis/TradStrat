@@ -15,7 +15,7 @@ from tradstrat.data import load_sample
 from tradstrat.strategies import STRATEGIES
 
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
-TABS = ["Results", "Trades", "Tune", "Compare", "Guide"]
+TABS = ["Results", "Stress test", "Trades", "Tune", "Compare", "Guide"]
 QUESTION_KEYS = [
     "golden_cross",
     "bitcoin_trend",
@@ -275,7 +275,7 @@ def test_an_unreadable_rule_shows_how_to_fix_it(app: AppTest) -> None:
 
 def test_a_custom_rule_can_be_tuned(app: AppTest) -> None:
     app.sidebar.selectbox[0].set_value("custom").run()
-    app.tabs[2].slider[0].set_value(3)
+    app.tabs[3].slider[0].set_value(3)
     button(app, "Run search").click().run()
 
     assert not app.exception
@@ -361,3 +361,26 @@ def test_newcomers_can_watch_the_tour_from_the_landing_page() -> None:
 
     assert not test.exception
     assert test.get("video")
+
+
+def test_the_stress_test_answers_six_questions(app: AppTest) -> None:
+    rendered = " ".join(str(element.proto) for element in app.get("html"))
+
+    for question in (
+        "Was the market picked with hindsight?",
+        "Are the fills realistic?",
+        "Are all the costs included?",
+        "Does it depend on the start date?",
+        "best trades?",
+        "Did it survive a real bear market?",
+    ):
+        assert question in rendered
+    assert "stress tests." in rendered
+    assert not app.exception
+
+
+def test_results_summarize_the_stress_test(app: AppTest) -> None:
+    rendered = " ".join(str(element.proto) for element in app.get("html"))
+
+    assert "Stress test" in rendered
+    assert "Costs, start dates, best trades and crashes" in rendered

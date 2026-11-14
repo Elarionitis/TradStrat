@@ -19,6 +19,7 @@ import plotly.graph_objects as go
 from tradstrat.metrics import calendar_year_returns, rolling_sharpe
 from tradstrat.rules import RuleStrategy
 from tradstrat.strategies import STRATEGIES, BuyAndHoldStrategy
+from tradstrat.stress import Crash
 
 # The two lines on every comparison chart, named as the dashboard's answer names them.
 RULE_NAME: Final[str] = "Your rule"
@@ -540,3 +541,64 @@ def comparison_figure(
     # Six names do not fit on one line above the plot, so the legend moves below it.
     figure.update_layout(legend={"yanchor": "top", "y": -0.12}, margin={"b": 8})
     return figure
+
+
+def start_dates_figure(windows: pd.DataFrame, years: int, theme: ChartTheme = LIGHT) -> go.Figure:
+    """Growth per year of each equal-length window, plotted at the month it starts."""
+    figure = go.Figure(
+        [
+            _line(windows.set_index("Start")["Hold"], HOLD_NAME, theme.benchmark),
+            _line(windows.set_index("Start")["Rule"], RULE_NAME, theme.strategy),
+        ]
+    )
+    figure.add_hline(y=0, line={"color": theme.axis, "width": 1})
+    _crosshair(figure, theme)
+    figure.update_traces(hovertemplate="%{y:.1%} a year")
+    figure.update_yaxes(tickformat=".0%")
+    title = f"Growth per year over the next {years} year{'s' if years != 1 else ''}, by start month"
+    return _style(figure, theme, title, "Growth per year", "Start month")
+
+
+def best_trades_figure(
+    strategy: pd.Series, without: pd.Series, benchmark: pd.Series, removed: int, theme: ChartTheme = LIGHT
+) -> go.Figure:
+    """The rule with and without its best trades, against holding."""
+    label = f"Without its best {removed}"
+    figure = go.Figure(
+        [
+            _line(benchmark, HOLD_NAME, theme.benchmark),
+            _line(strategy, RULE_NAME, theme.strategy),
+            _line(without, label, theme.strategy, dash="dot"),
+        ]
+    )
+    _label_line_end(figure, without, label, theme)
+    _crosshair(figure, theme)
+    figure.update_traces(hovertemplate="$%{y:,.0f}")
+    figure.update_yaxes(tickprefix="$", separatethousands=True)
+    _style(figure, theme, "Growth without the best trades", "Portfolio value")
+    figure.update_layout(margin={"r": 130})
+    _fit_dates(figure, strategy.index)
+    return figure
+
+
+def crashes_figure(crashes: list[Crash], theme: ChartTheme = LIGHT) -> go.Figure:
+    """Each deep fall of the asset, from peak to bottom, for the rule and for holding."""
+    names = [crash.name for crash in crashes]
+    figure = go.Figure(
+        [
+            go.Bar(
+                x=names, y=[crash.rule for crash in crashes], name=RULE_NAME, marker={"color": theme.strategy}
+            ),
+            go.Bar(
+                x=names,
+                y=[crash.hold for crash in crashes],
+                name=HOLD_NAME,
+                marker={"color": theme.benchmark},
+            ),
+        ]
+    )
+    figure.update_traces(hovertemplate="%{y:.1%}", marker_cornerradius=4)
+    figure.update_layout(barmode="group", bargap=0.35, bargroupgap=0.08, hovermode="x unified")
+    figure.update_yaxes(tickformat=".0%")
+    figure.update_xaxes(type="category")
+    return _style(figure, theme, "Loss from the asset's peak to its bottom", "Change")

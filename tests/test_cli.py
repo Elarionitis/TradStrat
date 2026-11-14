@@ -222,3 +222,20 @@ def test_list_explains_how_to_write_a_rule(capsys: pytest.CaptureFixture[str]) -
     assert main(["list"]) == 0
 
     assert "--buy" in capsys.readouterr().out
+
+
+def test_stress_command_answers_the_six_questions(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["stress", "--sample"]) == 0
+
+    output = capsys.readouterr().out
+    assert "stress tests." in output
+    for number in range(1, 7):
+        assert f"{number}. " in output
+    assert "Did it survive a real bear market?" in output
+
+
+def test_reports_include_the_stress_test(tmp_path: Path) -> None:
+    out = tmp_path / "report.html"
+    assert main(["report", "--sample", "--out", str(out)]) == 0
+
+    assert "Stress test: Passed" in out.read_text()

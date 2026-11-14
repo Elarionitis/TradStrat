@@ -28,7 +28,7 @@ from tradstrat.charts import (
     rolling_sharpe_figure,
 )
 from tradstrat.engine import BacktestResult
-from tradstrat.reporting import Verdict, assess, comparison_table, format_metric
+from tradstrat.reporting import StressCheck, Verdict, assess, comparison_table, format_metric, stress_summary
 from tradstrat.stats import BootstrapResult, bootstrap, probabilistic_sharpe_ratio
 
 HEADLINE: Final[tuple[str, ...]] = ("total_return", "cagr", "sharpe_ratio", "max_drawdown")
@@ -49,6 +49,7 @@ class ReportContext:
     asset: str
     parameters: dict[str, float] = field(default_factory=dict)
     overlays: pd.DataFrame | None = None
+    stress: tuple[StressCheck, ...] = ()
 
 
 def _figure_html(figure: go.Figure, include_plotlyjs: bool | str) -> str:
@@ -108,6 +109,23 @@ def _robustness(result: BacktestResult, estimate: BootstrapResult | None) -> str
         ]
     body = "".join(f"<tr><th>{label}</th><td>{value}</td></tr>" for label, value in rows)
     return f'<table class="plain">{body}</table>'
+
+
+def _stress(checks: tuple[StressCheck, ...]) -> str:
+    """The six questions worth asking of any backtest, with this one's answers."""
+    if not checks:
+        return ""
+    items = "".join(
+        f'<li class="finding {check.tone}">'
+        f'<span class="icon" aria-hidden="true">{TONE_ICONS[check.tone]}</span>'
+        f"<span><strong>{html.escape(check.question)}</strong> <em>{html.escape(check.status)}.</em> "
+        f"{html.escape(check.answer)}</span></li>"
+        for check in checks
+    )
+    return (
+        f"<section><h3>Stress test: {html.escape(stress_summary(checks))}</h3>"
+        f'<ol class="findings stress">{items}</ol></section>'
+    )
 
 
 def _settings(result: BacktestResult, context: ReportContext) -> str:
@@ -219,6 +237,7 @@ def build_report(
   <div><h3>How much to trust it</h3>{_robustness(result, estimate)}
   <h3>Settings</h3>{_settings(result, context)}</div>
 </section>
+{_stress(context.stress)}
 <section><h3>Trades</h3>{_trades(result)}</section>
 <footer>
   <p>Signals fill at the next bar's open, after commission and slippage. Prices include dividends. Sharpe
@@ -288,6 +307,9 @@ h3 { font-size: 16px; margin: 28px 0 10px; }
 .finding.good .icon { color: var(--accent); } .finding.bad .icon { color: var(--muted); }
 .finding.warning .icon { color: var(--warning); } .finding.neutral .icon { color: var(--muted); }
 .finding strong { color: var(--ink); }
+.findings.stress { grid-template-columns: 1fr; gap: 12px; }
+.findings.stress em { font-style: normal; font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;
   margin: 24px 0; }
 .kpi { border-top: 1px solid var(--hairline); padding: 14px 0 4px; }

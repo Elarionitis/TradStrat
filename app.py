@@ -23,8 +23,10 @@ from tradstrat import __version__
 from tradstrat.charts import (
     ChartTheme,
     annual_returns_figure,
+    best_trades_figure,
     bootstrap_figure,
     comparison_figure,
+    crashes_figure,
     drawdown_figure,
     equity_figure,
     fold_scores_figure,
@@ -33,6 +35,7 @@ from tradstrat.charts import (
     price_figure,
     rolling_sharpe_figure,
     search_figure,
+    start_dates_figure,
     theme_for,
 )
 from tradstrat.data import (
@@ -51,22 +54,35 @@ from tradstrat.metrics import calendar_year_returns, rolling_sharpe
 from tradstrat.reporting import (
     METRIC_LABELS,
     Round,
+    StressCheck,
     Verdict,
     assess,
     assess_search,
     comparison_table,
     format_metric,
     rounds,
+    stress_checks,
+    stress_summary,
 )
 from tradstrat.rules import EXAMPLES, RuleError, RuleStrategy, compile_rule
 from tradstrat.stats import BootstrapResult, bootstrap, probabilistic_sharpe_ratio
 from tradstrat.strategies import (
     STRATEGIES,
+    Strategy,
     StrategyRef,
     create_strategy,
     indicator_overlays,
     latest_signal,
     strategy_class,
+)
+from tradstrat.stress import (
+    BestTradesResult,
+    Crash,
+    StartDateResult,
+    cost_test,
+    crash_test,
+    start_date_test,
+    without_best_trades,
 )
 from tradstrat.tearsheet import ReportContext, build_report
 from tradstrat.validation import (
@@ -127,7 +143,7 @@ TRAIN_WINDOWS: Final[dict[str, int]] = {
     "5 years": 1260,
 }
 TEST_WINDOWS: Final[dict[str, int]] = {"3 months": 63, "6 months": 126, "1 year": 252, "2 years": 504}
-TABS: Final[list[str]] = ["Results", "Trades", "Tune", "Compare", "Guide"]
+TABS: Final[list[str]] = ["Results", "Stress test", "Trades", "Tune", "Compare", "Guide"]
 TONE_MARKS: Final[dict[str, str]] = {"good": "✓", "warning": "!", "bad": "✕", "neutral": "•"}
 PALETTE: Final[dict[str, dict[str, str]]] = {
     "light": {
@@ -253,6 +269,35 @@ def cached_comparison(
     if rule is not None:
         keys.insert(0, compile_rule(*rule))
     return compare_strategies(prices, config, keys)
+
+
+@st.cache_data(show_spinner="Trying the rule from other start dates...", ttl=3600, max_entries=100)
+def cached_start_dates(
+    prices: pd.DataFrame, config: BacktestConfig, key: str, _strategy: Strategy
+) -> StartDateResult | None:
+    """``key`` identifies ``_strategy``, which Streamlit cannot hash on its own."""
+    return start_date_test(prices, _strategy, config)
+
+
+@dataclass(frozen=True)
+class Stress:
+    """The six questions answered for this run, plus the results behind the charts."""
+
+    checks: tuple[StressCheck, ...]
+    start_dates: StartDateResult | None
+    best_trades: BestTradesResult | None
+    crashes: list[Crash]
+
+
+def run_stress(prices: pd.DataFrame, strategy: Strategy, result: BacktestResult, inputs: Inputs) -> Stress:
+    key = f"{inputs.strategy_key}|{strategy!r}|{sorted(inputs.params.items())}|{inputs.rule}"
+    start_dates = cached_start_dates(prices, result.config, key, strategy)
+    best_trades = without_best_trades(result)
+    crashes = crash_test(result)
+    checks = stress_checks(
+        inputs.label, cost_test(prices, strategy, result), start_dates, best_trades, crashes
+    )
+    return Stress(checks, start_dates, best_trades, crashes)
 
 
 def load_prices(inputs: Inputs) -> tuple[pd.DataFrame, str | None]:
@@ -1061,6 +1106,11 @@ def render_landing(theme: ChartTheme) -> None:
             "Did the rule beat just holding? Could it be luck? Would it have held up on data it was never "
             "tuned on?",
         ),
+        (
+            "Stress-test it",
+            "Start it in 120 different months, take away its 5 best trades, double the costs, and replay "
+            "every crash. A rule worth trusting survives all of it.",
+        ),
     ]
     items = "".join(
         f'<div class="ts-step"><span class="ts-step-number">{number}</span>'
@@ -1072,7 +1122,8 @@ def render_landing(theme: ChartTheme) -> None:
   <div class="ts-why">
     <h3 class="ts-display">Why this exists</h3>
     <p>Most trading ideas look great on a chart and then lose real money. The usual reasons are hidden
-    costs, hindsight and plain luck. TradStrat checks for all three, for free, before you risk anything.</p>
+    costs, hindsight and plain luck. TradStrat checks for all three, and stress-tests every result, for free,
+    before you risk anything.</p>
   </div>
   <div class="ts-steps">{items}</div>
   <div class="ts-muted ts-small">Words with a dotted underline, like {rich("Sharpe ratio")}, explain
@@ -1315,7 +1366,7 @@ def render_answer(result: BacktestResult, probability: float, asset: str) -> Non
 
 
 def render_results(
-    result: BacktestResult, estimate: BootstrapResult | None, theme: ChartTheme, asset: str
+    result: BacktestResult, estimate: BootstrapResult | None, stress: Stress, theme: ChartTheme, asset: str
 ) -> None:
     probability = estimate.probability_beats_benchmark if estimate else float("nan")
     render_answer(result, probability, asset)
@@ -1331,6 +1382,7 @@ def render_results(
   <span class="ts-money-hold">${hold_end:,.0f}</span> just holding {html.escape(asset)}.
 </div>"""
     )
+    st.html(stress_strip_html(stress.checks))
     log_scale = st.toggle("Log scale", key="log_equity", help="Show equal percentage moves as equal heights.")
     chart(
         equity_figure(
@@ -1427,6 +1479,63 @@ def render_luck(result: BacktestResult, estimate: BootstrapResult | None, theme:
     chart(
         bootstrap_figure(estimate.sharpe_samples, estimate.sharpe.low, estimate.sharpe.high, observed, theme)
     )
+
+
+def stress_html(checks: tuple[StressCheck, ...], seen: set[str]) -> str:
+    """The six questions as a numbered list, each with its status and the answer for this run."""
+    rows = []
+    for number, check in enumerate(checks, start=1):
+        rows.append(
+            f"""<div class="ts-stress-row ts-tone-{check.tone}">
+  <span class="ts-stress-num">{number:02d}</span>
+  <div>
+    <div class="ts-stress-q">{html.escape(check.question)}</div>
+    <p>{rich(check.answer, seen)}</p>
+  </div>
+  <span class="ts-stress-status">{html.escape(check.status)}</span>
+</div>"""
+        )
+    return f'<div class="ts ts-stress ts-rise">{"".join(rows)}</div>'
+
+
+def render_stress(stress: Stress, result: BacktestResult, theme: ChartTheme) -> None:
+    prose(
+        "Six questions to ask of any backtest before you trust it. TradStrat answers four of them by "
+        "rerunning your rule in harder conditions, and tells you plainly about the two it cannot test.",
+        muted=True,
+    )
+    summary = html.escape(stress_summary(stress.checks))
+    st.html(f'<div class="ts ts-stress-head"><span class="ts-display">{summary}</span></div>')
+    st.html(stress_html(stress.checks, set()))
+    if stress.start_dates is not None:
+        chart(start_dates_figure(stress.start_dates.windows, stress.start_dates.years, theme))
+    best = stress.best_trades
+    if best is not None and best.trades > best.removed:
+        chart(
+            best_trades_figure(
+                result.results["Strategy Equity"],
+                best.equity_without,
+                result.results["Buy and Hold Benchmark"],
+                best.removed,
+                theme,
+            )
+        )
+    if stress.crashes:
+        chart(crashes_figure(stress.crashes, theme))
+
+
+def stress_strip_html(checks: tuple[StressCheck, ...]) -> str:
+    """A one-line summary of the stress test for the Results tab."""
+    chips = "".join(
+        f'<span class="ts-stress-chip ts-tone-{check.tone}">{html.escape(check.status)}</span>'
+        for check in checks
+        if check.computed
+    )
+    return f"""<div class="ts ts-stress-strip ts-rise" style="--delay:.18s">
+  <span class="ts-eyebrow">Stress test</span>
+  <strong>{html.escape(stress_summary(checks))}</strong>{chips}
+  <span class="ts-muted">Costs, start dates, best trades and crashes, in the Stress test tab.</span>
+</div>"""
 
 
 def render_trades(result: BacktestResult, prices: pd.DataFrame, inputs: Inputs, theme: ChartTheme) -> None:
@@ -1773,7 +1882,11 @@ Past performance does not predict future results.</div>"""
 
 
 def report_builder(
-    result: BacktestResult, prices: pd.DataFrame, inputs: Inputs, estimate: BootstrapResult | None
+    result: BacktestResult,
+    prices: pd.DataFrame,
+    inputs: Inputs,
+    estimate: BootstrapResult | None,
+    stress: Stress,
 ):
     """Build the HTML report only when someone clicks download."""
 
@@ -1785,6 +1898,7 @@ def report_builder(
             asset=inputs.label,
             parameters={spec.name: getattr(strategy, spec.name) for spec in cls.params},
             overlays=indicator_overlays(strategy, prices),
+            stress=stress.checks,
         )
         return build_report(result, context, estimate=estimate)
 
@@ -1843,10 +1957,11 @@ def main() -> None:
         if len(result.excess_returns) >= 40
         else None
     )
+    stress = run_stress(prices, strategy, result, inputs)
     with actions:
         st.download_button(
             "Download report",
-            report_builder(result, prices, inputs, estimate),
+            report_builder(result, prices, inputs, estimate, stress),
             file_name=f"tradstrat-{inputs.strategy_key}-{inputs.label.lower().replace(' ', '-')}.html",
             mime="text/html",
             icon=":material/download:",
@@ -1856,9 +1971,11 @@ def main() -> None:
         )
     render_context(prices, inputs, warning)
 
-    results, trades, tune, compare, guide = st.tabs(TABS)
+    results, stress_tab, trades, tune, compare, guide = st.tabs(TABS)
     with results:
-        render_results(result, estimate, theme, inputs.label)
+        render_results(result, estimate, stress, theme, inputs.label)
+    with stress_tab:
+        render_stress(stress, result, theme)
     with trades:
         render_trades(result, prices, inputs, theme)
     with tune:

@@ -7,6 +7,7 @@ Examples:
     tradstrat compare --ticker GLD
     tradstrat optimize --ticker SPY --strategy ma_crossover --points 6
     tradstrat walk-forward --ticker SPY --strategy donchian --train-bars 756 --test-bars 252
+    tradstrat stress --ticker SPY --strategy trend_filter --start 1993-01-01
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+import textwrap
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -24,11 +26,14 @@ from tradstrat.data import attach_cash_rate, fetch_cash_rate, fetch_ohlcv, load_
 from tradstrat.engine import BacktestConfig, BacktestResult, run_backtest
 from tradstrat.reporting import (
     METRIC_LABELS,
+    StressCheck,
     assess,
     comparison_table,
     format_metric,
     overfitting_verdict,
     probability_verdict,
+    stress_summary,
+    stress_test,
 )
 from tradstrat.rules import VOCABULARY, RuleError, compile_rule
 from tradstrat.stats import bootstrap, probabilistic_sharpe_ratio
@@ -119,6 +124,11 @@ def _build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--points", type=int, default=5, help="Grid points per parameter.")
     optimize.add_argument("--objective", default="sharpe_ratio", choices=OBJECTIVES)
     optimize.add_argument("--top", type=int, default=10, help="Rows of results to show.")
+
+    stress = commands.add_parser(
+        "stress", parents=[shared], help="Ask the six questions worth asking of any backtest."
+    )
+    stress.add_argument("--param", "-p", action="append", type=_parse_param, default=[], metavar="NAME=VALUE")
 
     forward = commands.add_parser("walk-forward", parents=[shared], help="Run walk-forward validation.")
     forward.add_argument("--points", type=int, default=5, help="Grid points per parameter.")
@@ -224,6 +234,21 @@ def _run_backtest(args: argparse.Namespace) -> None:
         print(f"\nWrote {len(result.trade_log)} trades to {args.trades_out}")
 
 
+def _print_stress(checks: tuple[StressCheck, ...]) -> None:
+    print(f"\n{stress_summary(checks)}")
+    for number, check in enumerate(checks, start=1):
+        print(f"\n{TONE_MARKERS[check.tone]} {number}. {check.question} ({check.status})")
+        print(textwrap.fill(check.answer, 100, initial_indent="    ", subsequent_indent="    "))
+
+
+def _run_stress(args: argparse.Namespace) -> None:
+    data = _load_data(args)
+    strategy = create_strategy(_strategy(args), **dict(args.param))
+    result = run_backtest(data, strategy, _config(args))
+    print(f"{strategy}\n{_period(data)}")
+    _print_stress(stress_test(data, strategy, result, _asset_label(args)))
+
+
 def _run_report(args: argparse.Namespace) -> None:
     data = _load_data(args)
     reference = _strategy(args)
@@ -235,6 +260,7 @@ def _run_report(args: argparse.Namespace) -> None:
         asset=_asset_label(args),
         parameters={spec.name: getattr(strategy, spec.name) for spec in cls.params},
         overlays=indicator_overlays(strategy, data),
+        stress=stress_test(data, strategy, result, _asset_label(args)),
     )
     path = write_report(args.out, build_report(result, context, offline=args.offline))
     print(f"Wrote {path}")
@@ -305,6 +331,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "compare": _run_compare,
         "optimize": _run_optimize,
         "walk-forward": _run_walk_forward,
+        "stress": _run_stress,
     }
     if args.command == "list":
         _list_strategies()
