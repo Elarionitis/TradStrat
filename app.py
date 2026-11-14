@@ -713,7 +713,7 @@ def rules_html() -> str:
 @st.dialog("TradStrat in 40 seconds", width="large")
 def show_tour() -> None:
     st.video(str(TOUR), autoplay=True, muted=True)
-    st.caption("No sound needed. Close this to try a question yourself.")
+    st.caption("It starts muted. Turn on the sound for music, or close this to try a question yourself.")
 
 
 @st.dialog("How rules work", width="large")
