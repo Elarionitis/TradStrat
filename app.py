@@ -172,6 +172,7 @@ PALETTE: Final[dict[str, dict[str, str]]] = {
     },
 }
 ASSETS: Final[Path] = Path(__file__).parent / "assets"
+TOUR: Final[Path] = ASSETS / "tradstrat-tour.mp4"
 STYLESHEET: Final[str] = (ASSETS / "dashboard.css").read_text()
 
 
@@ -709,6 +710,12 @@ def rules_html() -> str:
 </div>"""
 
 
+@st.dialog("TradStrat in 40 seconds", width="large")
+def show_tour() -> None:
+    st.video(str(TOUR), autoplay=True, muted=True)
+    st.caption("No sound needed. Close this to try a question yourself.")
+
+
 @st.dialog("How rules work", width="large")
 def rules_dialog() -> None:
     st.html(rules_html())
@@ -1004,6 +1011,10 @@ def render_landing(theme: ChartTheme) -> None:
   </figure>
 </div>"""
     )
+    if TOUR.exists() and st.button(
+        "Watch the 40-second tour", key="watch_tour", type="tertiary", icon=":material/play_circle:"
+    ):
+        show_tour()
     st.html(
         '<div class="ts ts-landing-head ts-rise" style="--delay:.25s"><h3 class="ts-display">'
         'Start with a question</h3><div class="ts-muted">Six classic ideas, each tested on real prices '

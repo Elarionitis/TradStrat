@@ -599,6 +599,16 @@
   color: var(--ts-muted);
 }
 
+.st-key-watch_tour {
+  margin: -18px 0 18px;
+}
+
+.st-key-watch_tour button {
+  font-weight: 600;
+  color: var(--ts-rule);
+  padding-left: 0;
+}
+
 .ts-landing-head {
   margin-bottom: 6px;
 }

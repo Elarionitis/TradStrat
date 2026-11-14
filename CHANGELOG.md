@@ -25,6 +25,8 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 - **A landing page built around questions.** The dashboard opens by explaining what it does in one sentence,
   beside an animated example, and offers six ready-made questions such as *"Does the famous golden cross beat
   the S&P 500?"*. One click runs the test on real prices.
+- **A 40-second tour.** A short silent video on the landing page and in the README shows the problem, a
+  real test, a custom rule and the checks that decide whether to believe the result.
 - **Help for newcomers.** The dashboard states the rule being tested in one sentence, explains each built-in strategy
   in plain English, and defines jargon such as the Sharpe ratio on hover.
 - **A verdict on parameter searches** that combines the deflated Sharpe ratio and the probability of

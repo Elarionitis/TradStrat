@@ -352,3 +352,12 @@ def test_the_theme_config_is_one_streamlit_accepts() -> None:
     parse_fonts_with_source(
         CustomThemeConfig(), theme.get("font"), theme.get("codeFont"), theme.get("headingFont"), "theme"
     )
+
+
+def test_newcomers_can_watch_the_tour_from_the_landing_page() -> None:
+    test = landing()
+
+    next(item for item in test.button if item.key == "watch_tour").click().run()
+
+    assert not test.exception
+    assert test.get("video")
