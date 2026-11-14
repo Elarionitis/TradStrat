@@ -28,7 +28,7 @@ def _forget_stale_package() -> None:
     if loaded is None:
         return
     newest = max(path.stat().st_mtime for path in Path(__file__).with_name("tradstrat").glob("*.py"))
-    if newest > getattr(loaded, "LOADED_AT", newest):
+    if newest > getattr(loaded, "LOADED_AT", 0.0):  # Packages from before this check have no stamp.
         for name in [name for name in sys.modules if name.partition(".")[0] == "tradstrat"]:
             del sys.modules[name]
 

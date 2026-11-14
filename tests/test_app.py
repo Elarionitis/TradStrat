@@ -54,10 +54,17 @@ def test_first_load_renders_results_without_errors(app: AppTest) -> None:
     assert metric_labels(app) >= {"Total return", "Annual return", "Sharpe ratio", "Max drawdown"}
 
 
-def test_a_package_changed_since_import_is_reloaded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Regression guard: Streamlit Cloud pulls new code without a restart, which once broke the live site."""
+@pytest.mark.parametrize("stamped", [True, False])
+def test_a_package_changed_since_import_is_reloaded(monkeypatch: pytest.MonkeyPatch, stamped: bool) -> None:
+    """Regression guard: Streamlit Cloud pulls new code without a restart, which once broke the live site.
+
+    A package imported before the dashboard stamped its import time has no stamp at all.
+    """
     loaded = {name: module for name, module in sys.modules.items() if name.partition(".")[0] == "tradstrat"}
-    monkeypatch.setattr(tradstrat, "LOADED_AT", 0.0)
+    if stamped:
+        monkeypatch.setattr(tradstrat, "LOADED_AT", 0.0)
+    else:
+        monkeypatch.delattr(tradstrat, "LOADED_AT")
     monkeypatch.delattr(charts_module, "crashes_figure")
     try:
         test = AppTest.from_file(APP, default_timeout=90)
