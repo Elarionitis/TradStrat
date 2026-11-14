@@ -387,7 +387,9 @@ def test_newcomers_can_watch_the_tour_from_the_landing_page() -> None:
     next(item for item in test.button if item.key == "watch_tour").click().run()
 
     assert not test.exception
-    assert test.get("video")
+    video = test.get("video")[0].proto
+    assert video.autoplay
+    assert not video.muted  # The soundtrack plays from the start.
 
 
 def test_the_stress_test_answers_six_questions(app: AppTest) -> None:

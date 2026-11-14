@@ -348,12 +348,31 @@ def load_prices(inputs: Inputs) -> tuple[pd.DataFrame, str | None]:
 # are injected once and reused by every block of text on the page.
 
 
-def inject_styles(theme: ChartTheme) -> None:
-    colors = PALETTE[theme.name]
+def either(name: str) -> str:
+    """A color that follows the theme on screen, which Streamlit marks with ``color-scheme`` on the app.
+
+    Python's ``st.context.theme`` can be stale on the first load and after a switch in the settings menu, and
+    colors chosen from it then put dark-theme text on a light page. ``light-dark()`` is resolved by the
+    browser instead, so it is always right.
+    """
+    return f"light-dark({PALETTE['light'][name]},{PALETTE['dark'][name]})"
+
+
+def svg_palette(*names: str) -> str:
+    """CSS for an SVG image, giving it both themes' colors as variables.
+
+    An SVG shown as an image matches ``prefers-color-scheme`` to the color scheme of the page around it.
+    """
+    light = ";".join(f"--{name}:{PALETTE['light'][name]}" for name in names)
+    dark = ";".join(f"--{name}:{PALETTE['dark'][name]}" for name in names)
+    return f"svg{{{light}}}@media (prefers-color-scheme:dark){{svg{{{dark}}}}}"
+
+
+def inject_styles() -> None:
     names = ("ink", "muted", "border", "surface", "surface-2", "accent", "rule", "hold", "tip", "tip-ink")
-    variables = "".join(f"--ts-{name}:{colors[name]};" for name in names)
+    variables = "".join(f"--ts-{name}:{either(name)};" for name in names)
     tones = "".join(
-        f".ts-tone-{tone}{{--tone:{colors[tone]};--wash:{colors[tone + '-wash']};}}"
+        f".ts-tone-{tone}{{--tone:{either(tone)};--wash:{either(tone + '-wash')};}}"
         for tone in ("good", "warning", "bad", "neutral")
     )
     st.html(f"<style>:root{{{variables}}}{tones}{STYLESHEET}</style>")
@@ -777,8 +796,10 @@ def rules_html() -> str:
 
 @st.dialog("TradStrat in 40 seconds", width="large")
 def show_tour() -> None:
-    st.video(str(TOUR), autoplay=True, muted=True)
-    st.caption("It starts muted. Turn on the sound for music, or close this to try a question yourself.")
+    # Browsers allow sound here because the visitor has just clicked. One that still refuses leaves the
+    # video paused with its play button showing, rather than playing it silently.
+    st.video(str(TOUR), autoplay=True)
+    st.caption("Close this at any time to try a question yourself.")
 
 
 @st.dialog("How rules work", width="large")
@@ -793,20 +814,22 @@ def strategy_dialog(key: str) -> None:
     st.caption("The Trades tab draws every buy and sell this strategy made on the price chart.")
 
 
-def logo(theme: ChartTheme) -> str:
+def logo() -> str:
     """The mark in the theme's colors: a solid line for the rule over a dotted one for holding."""
-    colors = PALETTE[theme.name]
-    svg = (ASSETS / "logo.svg").read_text().replace("#8a8478", colors["ink"])
-    svg = svg.replace("#2a78d6", colors["rule"]).replace("#eb6834", colors["hold"])
+    svg = (ASSETS / "logo.svg").read_text()
+    for color, name in (("#8a8478", "ink"), ("#2a78d6", "rule"), ("#eb6834", "hold")):
+        svg = svg.replace(f'stroke="{color}"', f'style="stroke:var(--{name})"')
+    style = f"<style>{svg_palette('ink', 'rule', 'hold')}</style>"
+    svg = svg.replace('viewBox="0 0 34 34">', f'viewBox="0 0 34 34">{style}', 1)
     return base64.b64encode(svg.encode()).decode()
 
 
-def render_header(theme: ChartTheme, *, tagline: bool) -> None:
+def render_header(*, tagline: bool) -> None:
     words = "Test a trading idea on past prices, then find out whether to believe it."
     line = f'<div class="ts-tagline">{words}</div>' if tagline else ""
     st.html(
         f"""<div class="ts"><div class="ts-header">
-  <img src="data:image/svg+xml;base64,{logo(theme)}" width="34" height="34" alt="">
+  <img src="data:image/svg+xml;base64,{logo()}" width="34" height="34" alt="">
   <div><div class="ts-wordmark">TradStrat</div>{line}</div>
 </div></div>"""
     )
@@ -976,20 +999,14 @@ def _hero_series() -> tuple[np.ndarray, np.ndarray, int, int]:
     return hold, rule, first, last
 
 
-def hero_chart(theme: ChartTheme) -> str:
+def hero_chart() -> str:
     """The landing illustration: a trend rule and simply holding, through a crash, drawing themselves in.
 
     Streamlit strips inline SVG from HTML, so the drawing is an SVG image with the theme's colors and its
-    animation written inside it.
+    animation written inside it. Its colors follow the theme on screen.
     """
-    colors = PALETTE[theme.name]
-    rule_color, hold_color, grid, muted, ink = (
-        colors["rule"],
-        colors["hold"],
-        colors["border"],
-        colors["muted"],
-        colors["ink"],
-    )
+    names = ("rule", "hold", "border", "muted", "ink")
+    rule_color, hold_color, grid, muted, ink = (f"var(--{name})" for name in names)
     hold, rule, cash_from, cash_to = _hero_series()
     left, right, top, bottom = 34.0, 430.0, 34.0, 214.0
     low, high = np.log(min(hold.min(), rule.min())), np.log(max(hold.max(), rule.max()))
@@ -1020,6 +1037,7 @@ def hero_chart(theme: ChartTheme) -> str:
     band_left, band_right = x(cash_from), x(cash_to + 1)
     svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 246">
 <style>
+{svg_palette("rule", "hold", "border", "muted", "ink")}
 .l{{fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;
   animation:draw 2.4s cubic-bezier(.5,.05,.25,1) forwards}}
 .r{{stroke:{rule_color};stroke-width:2.6;animation-delay:.25s}} .h{{stroke:{hold_color}}}
@@ -1031,21 +1049,21 @@ text{{fill:{muted};font:500 10.5px ui-monospace,SFMono-Regular,Menlo,monospace}}
 @keyframes draw{{to{{stroke-dashoffset:0}}}} @keyframes fade{{to{{opacity:1}}}}
 @media (prefers-reduced-motion:reduce){{.l,.band,.note,.end{{animation:none;stroke-dashoffset:0;opacity:1}}}}
 </style>
-<g stroke="{grid}" stroke-width="1">{levels}</g>
+<g style="stroke:{grid}" stroke-width="1">{levels}</g>
 <rect class="band" x="{band_left:.1f}" y="{top - 14}" width="{band_right - band_left:.1f}"
-  height="{bottom - top + 14}" fill="{ink}" fill-opacity=".06"/>
-<g class="note"><line x1="{band_left:.1f}" y1="{top - 14}" x2="{band_left:.1f}" y2="{bottom}" stroke="{ink}"
-  stroke-opacity=".35" stroke-dasharray="2 3"/>
+  height="{bottom - top + 14}" style="fill:{ink}" fill-opacity=".06"/>
+<g class="note"><line x1="{band_left:.1f}" y1="{top - 14}" x2="{band_left:.1f}" y2="{bottom}"
+  style="stroke:{ink}" stroke-opacity=".35" stroke-dasharray="2 3"/>
 <text x="{band_left + 6:.1f}" y="{top - 3}">The rule sits in cash</text></g>
 <polyline class="l h" pathLength="1" points="{points(hold)}"/>
 <polyline class="l r" pathLength="1" points="{points(rule)}"/>
-<g class="end"><circle cx="{right}" cy="{y(rule[-1]):.1f}" r="3.5" fill="{rule_color}"/>
-<circle cx="{right}" cy="{y(hold[-1]):.1f}" r="3.5" fill="{hold_color}"/></g>
-<g stroke="{grid}">{marks}</g>{years}
-<g class="end"><rect x="{left}" y="6" width="14" height="2.6" fill="{rule_color}"/>
-<text x="{left + 20}" y="10" fill="{ink}">A trend rule</text>
-<rect x="{left + 110}" y="6" width="14" height="2.6" fill="{hold_color}"/>
-<text x="{left + 130}" y="10" fill="{ink}">Just holding</text></g>
+<g class="end"><circle cx="{right}" cy="{y(rule[-1]):.1f}" r="3.5" style="fill:{rule_color}"/>
+<circle cx="{right}" cy="{y(hold[-1]):.1f}" r="3.5" style="fill:{hold_color}"/></g>
+<g style="stroke:{grid}">{marks}</g>{years}
+<g class="end"><rect x="{left}" y="6" width="14" height="2.6" style="fill:{rule_color}"/>
+<text x="{left + 20}" y="10" style="fill:{ink}">A trend rule</text>
+<rect x="{left + 110}" y="6" width="14" height="2.6" style="fill:{hold_color}"/>
+<text x="{left + 130}" y="10" style="fill:{ink}">Just holding</text></g>
 </svg>"""
     encoded = base64.b64encode(svg.encode()).decode()
     return (
@@ -1054,7 +1072,7 @@ text{{fill:{muted};font:500 10.5px ui-monospace,SFMono-Regular,Menlo,monospace}}
     )
 
 
-def render_landing(theme: ChartTheme) -> None:
+def render_landing() -> None:
     """The first screen: what TradStrat is for, in plain words, and questions to start from."""
     seen: set[str] = set()
     st.html(
@@ -1070,7 +1088,7 @@ def render_landing(theme: ChartTheme) -> None:
     <div class="ts-hero-meta ts-rise" style="--delay:.22s">Seven classic strategies · Any Yahoo Finance
       ticker · Or write your own rule · Free and open source</div>
   </div>
-  <figure class="ts-hero-figure ts-rise" style="--delay:.1s">{hero_chart(theme)}
+  <figure class="ts-hero-figure ts-rise" style="--delay:.1s">{hero_chart()}
     <figcaption>Simulated prices. The rule sidesteps the crash, yet holding still ends ahead. Which
       matters more is what TradStrat helps you judge.</figcaption>
   </figure>
@@ -1928,16 +1946,16 @@ def report_builder(
 def main() -> None:
     st.set_page_config(page_title="TradStrat", page_icon=":material/monitoring:", layout="wide")
     theme = theme_for(st.context.theme.type == "dark")
-    inject_styles(theme)
+    inject_styles()
     restore_from_link()
     inputs = read_sidebar()
     started = has_started(inputs)
 
     header, ideas, actions = st.columns([5, 1.1, 1.4], vertical_alignment="center")
     with header:
-        render_header(theme, tagline=started)
+        render_header(tagline=started)
     if not started:
-        render_landing(theme)
+        render_landing()
         render_footer()
         return
     write_link(inputs, st.session_state.get("_history_for_link"))
