@@ -1,11 +1,14 @@
 [client]
 toolbarMode = "minimal"
+# Visitors see a short message instead of a traceback if something unexpected fails.
+showErrorDetails = "none"
 
 [browser]
 gatherUsageStats = false
 
 [server]
-maxUploadSize = 50
+maxUploadSize = 10
+headless = true
 
 [theme]
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"

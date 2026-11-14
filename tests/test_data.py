@@ -357,6 +357,20 @@ def test_all_history_does_not_start_at_the_epoch(monkeypatch: pytest.MonkeyPatch
     assert captured["start"] == "2020-03-04"
 
 
+def test_provider_errors_are_kept_apart_from_the_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(*_: object) -> None:
+        raise ConnectionError("rate limited")
+
+    monkeypatch.setattr(data_module, "PROVIDERS", (("alpha", broken),))
+
+    with pytest.raises(DataError) as caught:
+        fetch_ohlcv("SPY", "2024-01-02", "2024-01-31", use_cache=False)
+
+    assert "rate limited" not in caught.value.message
+    assert "alpha: rate limited" in caught.value.details
+    assert "rate limited" in str(caught.value)
+
+
 def test_unrecognized_multiindex_columns_are_rejected() -> None:
     frame = bars()
     frame.columns = pd.MultiIndex.from_product([["AAPL"], list("abcde")])

@@ -85,6 +85,7 @@ STRATEGY_CHOICES: Final[list[str]] = [*STRATEGY_KEYS, CUSTOM]
 DEFAULT_RULE: Final[tuple[str, str]] = EXAMPLES["Golden cross"]
 # A search runs one backtest per combination, so a rule with many numbers can ask for far too many.
 MAX_COMBINATIONS: Final[int] = 1_500
+MAX_RULE_CHARS: Final[int] = 300
 # The building blocks of a custom rule, with an example and what it means.
 RULE_PARTS: Final[list[tuple[str, str]]] = [
     ("close", "The closing price."),
@@ -219,30 +220,31 @@ class Inputs:
         )
 
 
-# Data loading, cached so that moving a slider does not refetch anything.
+# Data loading, cached so that moving a slider does not refetch anything. Every cache expires and has a size
+# limit, so a public server's memory stays bounded however many visitors try however many tickers.
 
 
-@st.cache_data(show_spinner="Fetching market data...", ttl=3600)
+@st.cache_data(show_spinner="Fetching market data...", ttl=3600, max_entries=200)
 def cached_fetch(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     return fetch_ohlcv(ticker, start, end)
 
 
-@st.cache_data(show_spinner="Fetching Treasury bill yields...", ttl=3600)
+@st.cache_data(show_spinner="Fetching Treasury bill yields...", ttl=3600, max_entries=50)
 def cached_cash_rate(start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
     return fetch_cash_rate(start, end)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=20)
 def cached_upload(contents: bytes, name: str) -> pd.DataFrame:
     return adjust_for_dividends(read_price_csv(io.BytesIO(contents), name))
 
 
-@st.cache_data(show_spinner="Checking how much of the result could be luck...")
+@st.cache_data(show_spinner="Checking how much of the result could be luck...", ttl=3600, max_entries=200)
 def cached_bootstrap(returns: pd.Series, benchmark: pd.Series) -> BootstrapResult:
     return bootstrap(returns, benchmark)
 
 
-@st.cache_data(show_spinner="Running every strategy...")
+@st.cache_data(show_spinner="Running every strategy...", ttl=3600, max_entries=50)
 def cached_comparison(
     prices: pd.DataFrame, config: BacktestConfig, rule: tuple[str, str] | None = None
 ) -> Comparison:
@@ -403,11 +405,12 @@ def read_rule() -> tuple[StrategyRef | None, str, str | None]:
             (name for name, rule in EXAMPLES.items() if rule == current), None
         )
     st.pills("Start from an example", list(EXAMPLES), key="rule_example", on_change=_use_example)
-    buy = st.text_input("Buy when", key="rule_buy", on_change=_edited_rule)
+    buy = st.text_input("Buy when", key="rule_buy", on_change=_edited_rule, max_chars=MAX_RULE_CHARS)
     sell = st.text_input(
         "Sell when",
         key="rule_sell",
         on_change=_edited_rule,
+        max_chars=MAX_RULE_CHARS,
         placeholder="Empty: sell once the buy rule stops being true",
     )
     text = f"{buy.strip()} | {sell.strip()}"
@@ -454,8 +457,8 @@ def restore_from_link() -> None:
     st.session_state["strategy"] = strategy
     st.session_state["started"] = True  # A shared link goes straight to its results.
     if strategy == CUSTOM:
-        st.session_state["rule_buy"] = query.get("buy", "")[:300]
-        st.session_state["rule_sell"] = query.get("sell", "")[:300]
+        st.session_state["rule_buy"] = query.get("buy", "")[:MAX_RULE_CHARS]
+        st.session_state["rule_sell"] = query.get("sell", "")[:MAX_RULE_CHARS]
         return
     for spec in STRATEGIES[strategy].params:
         try:
@@ -824,6 +827,37 @@ def start() -> None:
     st.session_state["started"] = True
 
 
+def use_demo_data() -> None:
+    st.session_state["source"] = "Sample"
+
+
+def render_problem(title: str, text: str) -> None:
+    """A calm note for something the visitor can fix, so it never reads as the site breaking."""
+    title, text = html.escape(title, quote=False), html.escape(text, quote=False)
+    st.html(
+        f"""<div class="ts ts-card ts-problem"><div class="ts-section-title">{title}</div>
+<div class="ts-muted">{text}</div></div>"""
+    )
+
+
+def render_data_problem(inputs: Inputs, error: DataError) -> None:
+    """Explain a failed price download in plain words, and offer a way to keep going."""
+    if inputs.source == "CSV":
+        title = "Upload a price file to begin" if inputs.upload is None else "This file could not be read"
+        render_problem(title, error.message)
+        return
+    render_problem(
+        f"We couldn't load prices for {inputs.ticker.strip().upper() or 'that ticker'}",
+        "Check the spelling as Yahoo Finance writes it, such as BTC-USD for Bitcoin or ^GSPC for the S&P 500 "
+        "index. If the symbol is right, Yahoo may be busy for a moment: try again shortly, or explore with "
+        "the demo data meanwhile.",
+    )
+    st.button("Use demo data instead", on_click=use_demo_data, icon=":material/science:")
+    if error.details:
+        with st.expander("Technical details"):
+            st.code(error.details, language=None, wrap_lines=True)
+
+
 def show_ideas() -> None:
     st.session_state["started"] = False
     st.query_params.clear()
@@ -892,10 +926,10 @@ def render_landing(theme: ChartTheme) -> None:
     <div class="ts-hero-eyebrow ts-rise">Free, open source, no sign-up</div>
     <h2 class="ts-hero-title ts-rise" style="--delay:.05s">Would this trading idea have made money?
       <span>And should you believe it?</span></h2>
-    <p class="ts-hero-lead ts-rise" style="--delay:.12s">Traders follow rules like "buy when the price breaks
-      above its average". TradStrat replays a rule on real past prices, with real trading costs, and races
-      it against simply buying and holding. Then it tells you, in plain English, whether the result looks
-      like skill or luck.</p>
+    <p class="ts-hero-lead ts-rise" style="--delay:.12s">Many people trade with simple rules, like "buy when
+      the price goes above its average". TradStrat tests a rule on years of real prices and compares it with
+      simply buying and holding. Then it tells you, in plain words, whether the rule really worked or just
+      got lucky.</p>
     <div class="ts-hero-facts ts-rise" style="--delay:.2s">
       <span>Stocks, ETFs and crypto</span><span>7 classic strategies</span><span>Or write your own</span>
     </div>
@@ -954,6 +988,10 @@ def render_landing(theme: ChartTheme) -> None:
     )
     st.html(
         f"""<div class="ts ts-how">
+  <div class="ts-section-title">Why this exists</div>
+  <p class="ts-why">Most trading ideas look great on a chart and then lose real money. The usual reasons
+  are hidden costs, hindsight and plain luck. TradStrat checks for all three, for free, before you risk
+  anything.</p>
   <div class="ts-section-title">How it works</div>
   <div class="ts-steps">{items}</div>
   <div class="ts-muted ts-small">Words with a dotted underline, like {rich("Sharpe ratio")}, explain
@@ -1707,12 +1745,14 @@ def main() -> None:
     try:
         prices, warning = load_prices(inputs)
     except DataError as error:
-        st.error(str(error))
+        render_data_problem(inputs, error)
         return
     if len(prices) <= strategy.warmup + 1:
-        st.warning(
-            f"{inputs.strategy_class.label} needs more than {strategy.warmup} trading days of "
-            f"history, but only {len(prices)} are available. Use a longer history or shorter windows."
+        render_problem(
+            "Not enough history for this rule yet",
+            f"{inputs.strategy_class.label} needs more than {strategy.warmup} trading days before it can "
+            f"make its first decision, and only {len(prices)} are available. Choose a longer history in the "
+            "sidebar, or shorter windows.",
         )
         return
 

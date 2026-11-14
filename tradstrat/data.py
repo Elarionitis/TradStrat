@@ -47,7 +47,16 @@ DATE_ALIASES: Final[tuple[str, ...]] = ("date", "datetime", "timestamp", "time",
 
 
 class DataError(ValueError):
-    """Raised when historical market data cannot be loaded or validated."""
+    """Raised when historical market data cannot be loaded or validated.
+
+    ``details`` holds technical context, such as each provider's own error, that helps a developer but would
+    only confuse someone reading the dashboard.
+    """
+
+    def __init__(self, message: str, details: str = "") -> None:
+        super().__init__(f"{message} {details}".strip())
+        self.message = message
+        self.details = details
 
 
 def _flatten_columns(data: pd.DataFrame) -> pd.DataFrame:
@@ -327,7 +336,8 @@ def fetch_ohlcv(
         if data is None:
             raise DataError(
                 f"No daily price data was found for {symbol} from {start_date.date()} to {end_date.date()}. "
-                f"Check the symbol and date range. Provider details: {' | '.join(errors)}"
+                "Check the symbol and date range.",
+                details=f"Provider details: {' | '.join(errors)}",
             )
         # A range that includes today can still gain bars, so caching it would freeze a partial result.
         if use_cache and end_date < pd.Timestamp.today().normalize():

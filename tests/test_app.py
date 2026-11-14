@@ -158,7 +158,8 @@ def test_csv_source_asks_for_a_file_before_running(app: AppTest) -> None:
     app.sidebar.segmented_control[0].set_value("CSV").run()
 
     assert not app.exception
-    assert "Upload a CSV file" in app.error[0].value
+    assert not app.error
+    assert "Upload a CSV file" in rendered(app)
 
 
 def test_the_rule_being_tested_is_stated_in_plain_english(app: AppTest) -> None:
@@ -316,3 +317,26 @@ def test_rule_text_from_a_link_cannot_inject_markdown() -> None:
     messages = [item.value for item in test.error]
     assert messages
     assert all("[x](http" not in message for message in messages)
+
+
+def test_a_failed_download_is_explained_calmly_and_offers_the_demo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A visitor who mistypes a ticker sees what to do next, not a red box of provider internals."""
+
+    def offline(*_: object) -> None:
+        raise ConnectionError("rate limited")
+
+    monkeypatch.setattr(data_module, "PROVIDERS", (("stub", offline),))
+    test = AppTest.from_file(APP, default_timeout=90)
+    test.session_state["started"] = True
+    test.session_state["ticker"] = "NOPE"
+    test.run()
+
+    assert not test.exception
+    assert not test.error
+    body = " ".join(element.proto.body for element in test.get("html"))
+    assert "couldn't load prices for NOPE" in body
+    assert "rate limited" not in body
+
+    button(test, "Use demo data instead").click().run()
+
+    assert [tab.label for tab in test.tabs] == TABS
