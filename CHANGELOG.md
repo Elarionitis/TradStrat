@@ -40,6 +40,12 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 
 ### Changed
 
+- Ready to run as a public website: friendly messages instead of raw errors when prices can't be loaded,
+  with a one-click switch to demo data; size limits on every cache, rule and upload; no tracebacks shown to
+  visitors; and a Dockerfile with a health check.
+- Plain-language wording on the landing page and in the README: what TradStrat is, why it exists, and who
+  it is for.
+
 - The dashboard was redesigned around five tabs: Results, Trades, Tune, Compare and Guide. It leads with the
   verdict, keeps advanced settings in one place, uses plain labels such as "Chance the edge is real", and its
   charts follow the light or dark theme.

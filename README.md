@@ -13,10 +13,17 @@
 
 </div>
 
-Most backtesters tell you how much a strategy would have made. TradStrat also tells you whether that number
-means anything. It simulates trades the way a broker would fill them, compares every result with simply
-holding the asset, puts confidence intervals on the outcome, and measures how much of a tuned result came from
-fitting noise. Then it gives you the answer in plain English.
+**What it is.** A free website that tests a trading rule, such as *"buy when the price goes above its
+200-day average"*, on years of real prices. It compares the rule with simply buying and holding, and tells
+you in plain words whether the rule really worked or just got lucky.
+
+**Why I built it.** Most trading ideas look great on a chart and then lose real money, usually because of
+hidden trading costs, hindsight, or plain luck. Most backtesting tools only tell you how much a rule would
+have made. TradStrat also checks whether that number can be trusted, and explains the answer so that someone
+with no finance background can follow it.
+
+**Who it is for.** Anyone curious about whether a trading idea holds up, from first-time investors to
+people who build trading strategies.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/landing_dark.png">
@@ -80,8 +87,26 @@ tradstrat walk-forward --ticker IWM --strategy momentum --train-bars 756 --test-
 tradstrat list
 ```
 
-If Yahoo Finance is unavailable, use `--sample` or pick **Sample** in the dashboard. That dataset is
+If Yahoo Finance is unavailable, use `--sample` or pick **Demo** in the dashboard. That dataset is
 simulated, so results on it say nothing about real markets.
+
+## Put It Online
+
+**Streamlit Community Cloud (free).** Sign in at [share.streamlit.io](https://share.streamlit.io) with
+GitHub, choose this repository, set the main file to `app.py` and Python to 3.12, and deploy. It installs
+`requirements.txt` and reads the settings in `.streamlit/config.toml`.
+
+**Any host that runs containers**, such as Render, Fly.io or Google Cloud Run:
+
+```bash
+docker build -t tradstrat .
+docker run -p 8501:8501 tradstrat
+```
+
+The image runs as a non-root user, listens on `$PORT` when the host sets one, and reports its health at
+`/_stcore/health`. Public servers share one address for every visitor's requests to Yahoo Finance, so heavy
+use can hit Yahoo's rate limits. The dashboard then says so in plain words and offers the demo data, and
+every download is cached for an hour.
 
 ## What It Found
 
