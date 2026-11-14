@@ -11,43 +11,45 @@ maxUploadSize = 10
 headless = true
 
 [theme]
-font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
-baseRadius = "0.6rem"
-buttonRadius = "0.6rem"
-headingFontWeights = [700, 600, 600, 600, 600, 600]
-metricValueFontWeight = 600
+# A research-notebook look: a serif for headlines, a plain sans for reading, a mono for numbers.
+font = "IBM Plex Sans:https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+headingFont = "Newsreader:https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,500&display=swap"
+codeFont = "IBM Plex Mono:https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
+baseRadius = "0.3rem"
+buttonRadius = "0.3rem"
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+metricValueFontWeight = 500
 showWidgetBorder = true
 showSidebarBorder = true
 
 [theme.light]
 primaryColor = "#2a78d6"
-backgroundColor = "#f9f9f7"
-secondaryBackgroundColor = "#f0efec"
-textColor = "#0b0b0b"
-borderColor = "#e1e0d9"
-dataframeBorderColor = "#e1e0d9"
-linkColor = "#256abf"
-greenColor = "#0ca30c"
-redColor = "#d03b3b"
+backgroundColor = "#f6f3ec"
+secondaryBackgroundColor = "#ece8de"
+textColor = "#16140f"
+borderColor = "#dcd6c8"
+dataframeBorderColor = "#dcd6c8"
+linkColor = "#2468bd"
+greenColor = "#0f7a3d"
+redColor = "#c23b33"
 chartCategoricalColors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#6250d6"]
 
 [theme.light.sidebar]
-backgroundColor = "#f2f1ed"
-secondaryBackgroundColor = "#e8e7e2"
+backgroundColor = "#efebe2"
+secondaryBackgroundColor = "#e4dfd3"
 
 [theme.dark]
 primaryColor = "#3987e5"
-backgroundColor = "#0f0f0e"
-secondaryBackgroundColor = "#1f1f1d"
-textColor = "#f0efec"
-borderColor = "#2c2c2a"
-dataframeBorderColor = "#2c2c2a"
-linkColor = "#5598e7"
-greenColor = "#0ca30c"
+backgroundColor = "#13120f"
+secondaryBackgroundColor = "#1f1d19"
+textColor = "#ece6d8"
+borderColor = "#2f2c26"
+dataframeBorderColor = "#2f2c26"
+linkColor = "#6aa3ea"
+greenColor = "#3fae6a"
 redColor = "#e66767"
 chartCategoricalColors = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9"]
 
 [theme.dark.sidebar]
-backgroundColor = "#151514"
-secondaryBackgroundColor = "#242422"
+backgroundColor = "#181713"
+secondaryBackgroundColor = "#24221d"

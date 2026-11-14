@@ -138,17 +138,17 @@ PALETTE: Final[dict[str, dict[str, str]]] = {
         "bad": "#b42b2b",
         "bad-wash": "#fbeaea",
         "neutral": "#52514e",
-        "neutral-wash": "#f0efec",
-        "ink": "#0b0b0b",
-        "muted": "#5f5e5a",
-        "border": "#e1e0d9",
-        "surface": "#ffffff",
+        "neutral-wash": "#ece8de",
+        "ink": "#16140f",
+        "muted": "#615d53",
+        "border": "#dcd6c8",
+        "surface": "#fbf9f4",
         "accent": "#2a78d6",
         "rule": "#2a78d6",
         "hold": "#eb6834",
-        "surface-2": "#f5f4f0",
-        "tip": "#1f1f1d",
-        "tip-ink": "#f7f6f2",
+        "surface-2": "#f1ede4",
+        "tip": "#1f1d19",
+        "tip-ink": "#f6f3ec",
     },
     "dark": {
         "good": "#3fbf3f",
@@ -158,21 +158,20 @@ PALETTE: Final[dict[str, dict[str, str]]] = {
         "bad": "#ee7a7a",
         "bad-wash": "#2e1717",
         "neutral": "#c3c2b7",
-        "neutral-wash": "#1f1f1d",
-        "ink": "#f0efec",
-        "muted": "#a8a79f",
-        "border": "#2c2c2a",
-        "surface": "#171716",
+        "neutral-wash": "#1f1d19",
+        "ink": "#ece6d8",
+        "muted": "#a39d8f",
+        "border": "#2f2c26",
+        "surface": "#191814",
         "accent": "#3987e5",
         "rule": "#3987e5",
         "hold": "#d95926",
-        "surface-2": "#1f1f1d",
-        "tip": "#f0efec",
-        "tip-ink": "#141413",
+        "surface-2": "#201e1a",
+        "tip": "#ece6d8",
+        "tip-ink": "#13120f",
     },
 }
 ASSETS: Final[Path] = Path(__file__).parent / "assets"
-LOGO: Final[str] = base64.b64encode((ASSETS / "logo.svg").read_bytes()).decode()
 STYLESHEET: Final[str] = (ASSETS / "dashboard.css").read_text()
 
 
@@ -722,12 +721,21 @@ def strategy_dialog(key: str) -> None:
     st.caption("The Trades tab draws every buy and sell this strategy made on the price chart.")
 
 
-def render_header() -> None:
+def logo(theme: ChartTheme) -> str:
+    """The mark in the theme's colors: a solid line for the rule over a dotted one for holding."""
+    colors = PALETTE[theme.name]
+    svg = (ASSETS / "logo.svg").read_text().replace("#8a8478", colors["ink"])
+    svg = svg.replace("#2a78d6", colors["rule"]).replace("#eb6834", colors["hold"])
+    return base64.b64encode(svg.encode()).decode()
+
+
+def render_header(theme: ChartTheme, *, tagline: bool) -> None:
+    words = "Test a trading idea on past prices, then find out whether to believe it."
+    line = f'<div class="ts-tagline">{words}</div>' if tagline else ""
     st.html(
         f"""<div class="ts"><div class="ts-header">
-  <img src="data:image/svg+xml;base64,{LOGO}" width="36" height="36" alt="">
-  <div><h1>TradStrat</h1>
-  <div class="ts-tagline">Test a trading idea on past prices, then find out whether to believe it.</div></div>
+  <img src="data:image/svg+xml;base64,{logo(theme)}" width="34" height="34" alt="">
+  <div><div class="ts-wordmark">TradStrat</div>{line}</div>
 </div></div>"""
     )
 
@@ -863,57 +871,114 @@ def show_ideas() -> None:
     st.query_params.clear()
 
 
-HERO_RULE_PATH: Final[str] = (
-    "M20 220 C60 214 80 196 110 200 S160 170 190 176 S240 132 270 140 S330 96 360 86 S390 70 400 64"
-)
-HERO_HOLD_PATH: Final[str] = (
-    "M20 222 C50 210 70 180 100 196 S140 150 160 172 S200 210 225 150 S260 120 290 160 S330 70 360 110 "
-    "S385 60 400 52"
-)
+HERO_START_YEAR: Final[int] = 2006
+HERO_YEARS: Final[int] = 19
+
+
+def _hero_series() -> tuple[np.ndarray, np.ndarray, int, int]:
+    """Simulated monthly prices with a 2008-style crash, and a 10-month trend rule run on them.
+
+    The rule is real: it owns the asset only while the previous month closed above its 10-month average, so
+    the drawing shows what such a rule does, rather than a line drawn to look good. The seed gives a typical
+    outcome: a much smaller crash, but a slightly lower ending value than holding.
+    """
+    rng = np.random.default_rng(40)
+    months = HERO_YEARS * 12
+    returns = rng.normal(0.008, 0.035, months)
+    crash_start, crash_end = 22, 38
+    returns[crash_start:crash_end] += np.linspace(-0.03, -0.055, crash_end - crash_start)
+    returns[crash_end : crash_end + 10] += 0.02
+    returns[170:172] -= 0.09
+    hold = 100 * np.cumprod(1 + returns)
+    average = pd.Series(hold).rolling(10, min_periods=10).mean().to_numpy()
+    owned = np.zeros(months, dtype=bool)
+    owned[1:] = hold[:-1] > np.nan_to_num(average[:-1], nan=np.inf)
+    owned[:10] = True
+    rule = 100 * np.cumprod(1 + np.where(owned, returns, 0.0))
+    # The stretch in cash that contains the bottom of the crash, for the shaded band.
+    first = last = crash_start + int(np.argmin(hold[crash_start:crash_end]))
+    while first > 0 and not owned[first - 1]:
+        first -= 1
+    while last < months - 1 and not owned[last + 1]:
+        last += 1
+    return hold, rule, first, last
 
 
 def hero_chart(theme: ChartTheme) -> str:
-    """An illustrative chart of a rule racing buy and hold, drawn with its own animation.
+    """The landing illustration: a trend rule and simply holding, through a crash, drawing themselves in.
 
     Streamlit strips inline SVG from HTML, so the drawing is an SVG image with the theme's colors and its
     animation written inside it.
     """
     colors = PALETTE[theme.name]
-    rule, hold, grid, muted = colors["rule"], colors["hold"], colors["border"], colors["muted"]
-    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 260">
+    rule_color, hold_color, grid, muted, ink = (
+        colors["rule"],
+        colors["hold"],
+        colors["border"],
+        colors["muted"],
+        colors["ink"],
+    )
+    hold, rule, cash_from, cash_to = _hero_series()
+    left, right, top, bottom = 34.0, 430.0, 34.0, 214.0
+    low, high = np.log(min(hold.min(), rule.min())), np.log(max(hold.max(), rule.max()))
+    step = (right - left) / (len(hold) - 1)
+
+    def x(month: float) -> float:
+        return left + month * step
+
+    def y(value: float) -> float:
+        return bottom - (np.log(value) - low) / (high - low) * (bottom - top)
+
+    def points(series: np.ndarray) -> str:
+        return " ".join(f"{x(i):.1f},{y(v):.1f}" for i, v in enumerate(series))
+
+    ticks = range(0, HERO_YEARS + 1, 4)
+    years = "".join(
+        f'<text x="{x(index * 12):.1f}" y="234" text-anchor="middle">{HERO_START_YEAR + index}</text>'
+        for index in ticks
+    )
+    marks = "".join(
+        f'<line x1="{x(index * 12):.1f}" y1="{bottom}" x2="{x(index * 12):.1f}" y2="{bottom + 4}"/>'
+        for index in ticks
+    )
+    levels = "".join(
+        f'<line x1="{left}" y1="{level:.1f}" x2="{right}" y2="{level:.1f}"/>'
+        for level in np.linspace(top, bottom, 4)
+    )
+    band_left, band_right = x(cash_from), x(cash_to + 1)
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 246">
 <style>
-.line{{fill:none;stroke-width:3;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;
-  animation:draw 2.2s cubic-bezier(.45,.05,.25,1) forwards}}
-.rule{{stroke:{rule};animation-delay:.35s}} .hold{{stroke:{hold};opacity:.9}}
-.area{{opacity:0;animation:fade 1s ease 1.9s forwards}}
-.dot{{transform-box:fill-box;transform-origin:center;transform:scale(0);
-  animation:pop .45s cubic-bezier(.3,1.6,.5,1) forwards,pulse 2.4s ease-in-out infinite}}
-.d1{{animation-delay:2.1s,3s}} .d2{{animation-delay:2.45s,3.3s}}
-text{{fill:{muted};font:500 12px system-ui,-apple-system,sans-serif}}
+.l{{fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;
+  animation:draw 2.4s cubic-bezier(.5,.05,.25,1) forwards}}
+.r{{stroke:{rule_color};stroke-width:2.6;animation-delay:.25s}} .h{{stroke:{hold_color}}}
+.band,.note{{opacity:0;animation:fade .7s ease 1.3s forwards}}
+.end{{opacity:0;animation:fade .4s ease 2.5s forwards}}
+text{{fill:{muted};font:500 10.5px ui-monospace,SFMono-Regular,Menlo,monospace}}
+.note text{{fill:{ink};font:500 11px system-ui,-apple-system,sans-serif}}
+.end text{{font:500 11px system-ui,-apple-system,sans-serif}}
 @keyframes draw{{to{{stroke-dashoffset:0}}}} @keyframes fade{{to{{opacity:1}}}}
-@keyframes pop{{to{{transform:scale(1)}}}} @keyframes pulse{{50%{{transform:scale(1.35)}}}}
-@media (prefers-reduced-motion:reduce){{.line,.area,.dot{{animation:none;stroke-dashoffset:0;opacity:1;
-  transform:none}}}}
+@media (prefers-reduced-motion:reduce){{.l,.band,.note,.end{{animation:none;stroke-dashoffset:0;opacity:1}}}}
 </style>
-<defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1">
-<stop offset="0" stop-color="{rule}" stop-opacity=".25"/>
-<stop offset="1" stop-color="{rule}" stop-opacity="0"/>
-</linearGradient></defs>
-<g stroke="{grid}" stroke-dasharray="3 5"><line x1="20" y1="60" x2="400" y2="60"/>
-<line x1="20" y1="120" x2="400" y2="120"/><line x1="20" y1="180" x2="400" y2="180"/>
-<line x1="20" y1="240" x2="400" y2="240"/></g>
-<path class="area" d="{HERO_RULE_PATH} L400 240 L20 240 Z" fill="url(#f)"/>
-<path class="line hold" pathLength="1" d="{HERO_HOLD_PATH}"/>
-<path class="line rule" pathLength="1" d="{HERO_RULE_PATH}"/>
-<circle class="dot d1" cx="400" cy="52" r="5" fill="{hold}"/>
-<circle class="dot d2" cx="400" cy="64" r="5" fill="{rule}"/>
-<rect x="24" y="16" width="12" height="3" rx="1.5" fill="{rule}"/><text x="42" y="21">A trading rule</text>
-<rect x="146" y="16" width="12" height="3" rx="1.5" fill="{hold}"/><text x="164" y="21">Just holding</text>
+<g stroke="{grid}" stroke-width="1">{levels}</g>
+<rect class="band" x="{band_left:.1f}" y="{top - 14}" width="{band_right - band_left:.1f}"
+  height="{bottom - top + 14}" fill="{ink}" fill-opacity=".06"/>
+<g class="note"><line x1="{band_left:.1f}" y1="{top - 14}" x2="{band_left:.1f}" y2="{bottom}" stroke="{ink}"
+  stroke-opacity=".35" stroke-dasharray="2 3"/>
+<text x="{band_left + 6:.1f}" y="{top - 3}">The rule sits in cash</text></g>
+<polyline class="l h" pathLength="1" points="{points(hold)}"/>
+<polyline class="l r" pathLength="1" points="{points(rule)}"/>
+<g class="end"><circle cx="{right}" cy="{y(rule[-1]):.1f}" r="3.5" fill="{rule_color}"/>
+<circle cx="{right}" cy="{y(hold[-1]):.1f}" r="3.5" fill="{hold_color}"/></g>
+<g stroke="{grid}">{marks}</g>{years}
+<g class="end"><rect x="{left}" y="6" width="14" height="2.6" fill="{rule_color}"/>
+<text x="{left + 20}" y="10" fill="{ink}">A trend rule</text>
+<rect x="{left + 110}" y="6" width="14" height="2.6" fill="{hold_color}"/>
+<text x="{left + 130}" y="10" fill="{ink}">Just holding</text></g>
 </svg>"""
     encoded = base64.b64encode(svg.encode()).decode()
     return (
         f'<img class="ts-hero-chart" src="data:image/svg+xml;base64,{encoded}" '
-        'alt="Illustration: a trading rule and simply holding, racing over time">'
+        'alt="A trend rule and simply holding over nineteen years: the rule sits in cash through a crash">'
     )
 
 
@@ -923,76 +988,81 @@ def render_landing(theme: ChartTheme) -> None:
     st.html(
         f"""<div class="ts ts-hero">
   <div class="ts-hero-text">
-    <div class="ts-hero-eyebrow ts-rise">Free, open source, no sign-up</div>
-    <h2 class="ts-hero-title ts-rise" style="--delay:.05s">Would this trading idea have made money?
-      <span>And should you believe it?</span></h2>
-    <p class="ts-hero-lead ts-rise" style="--delay:.12s">Many people trade with simple rules, like "buy when
+    <div class="ts-kicker ts-rise">A backtesting lab for everyone</div>
+    <h2 class="ts-hero-title ts-rise" style="--delay:.06s">Would this trading idea have made money?
+      <em>And should you believe it?</em></h2>
+    <p class="ts-hero-lead ts-rise" style="--delay:.14s">Many people trade with simple rules, like "buy when
       the price goes above its average". TradStrat tests a rule on years of real prices and compares it with
       simply buying and holding. Then it tells you, in plain words, whether the rule really worked or just
       got lucky.</p>
-    <div class="ts-hero-facts ts-rise" style="--delay:.2s">
-      <span>Stocks, ETFs and crypto</span><span>7 classic strategies</span><span>Or write your own</span>
-    </div>
+    <div class="ts-hero-meta ts-rise" style="--delay:.22s">Seven classic strategies · Any Yahoo Finance
+      ticker · Or write your own rule · Free and open source</div>
   </div>
-  <div class="ts-hero-art ts-rise" style="--delay:.1s">{hero_chart(theme)}</div>
+  <figure class="ts-hero-figure ts-rise" style="--delay:.1s">{hero_chart(theme)}
+    <figcaption>Simulated prices. The rule sidesteps the crash, yet holding still ends ahead. Which
+      matters more is what TradStrat helps you judge.</figcaption>
+  </figure>
 </div>"""
     )
     st.html(
-        '<div class="ts ts-landing-head ts-rise" style="--delay:.25s"><div class="ts-section-title">'
-        'Start with a question</div><div class="ts-muted">Pick one to run it on real prices. '
-        "Each takes a few seconds.</div></div>"
+        '<div class="ts ts-landing-head ts-rise" style="--delay:.25s"><h3 class="ts-display">'
+        'Start with a question</h3><div class="ts-muted">Six classic ideas, each tested on real prices '
+        "in a few seconds.</div></div>"
     )
-    # Cards rise one after another. Their containers are Streamlit's, so each gets its place by key.
+    # Questions rise one after another. Their containers are Streamlit's, so each gets its place by key.
     order = "".join(f".st-key-question_{q.key}{{--order:{n}}}" for n, q in enumerate(QUESTIONS))
     st.html(f"<style>{order}</style>")
-    for row in (QUESTIONS[:3], QUESTIONS[3:]):
-        for column, question in zip(st.columns(3, gap="small"), row, strict=True):
-            with column, st.container(key=f"question_{question.key}"):
-                st.html(
-                    f"""<div class="ts ts-question">
-  <span class="ts-question-tag">{html.escape(question.tag)}</span>
-  <div class="ts-question-title">{html.escape(question.question)}</div>
-  <div class="ts-question-detail">{rich(question.detail, seen)}</div>
-  <div class="ts-question-meta">{html.escape(question.ticker)} · {PERIOD_NAMES[question.history]}</div>
+    for number, question in enumerate(QUESTIONS, start=1):
+        if number % 2:
+            columns = iter(st.columns(2, gap="large"))  # A row per pair keeps the entries level.
+        with next(columns), st.container(key=f"question_{question.key}"):
+            st.html(
+                f"""<div class="ts ts-question">
+  <span class="ts-question-number">{number:02d}</span>
+  <div class="ts-question-body">
+    <div class="ts-question-tag">{html.escape(question.tag)} · {html.escape(question.ticker)} ·
+      {PERIOD_NAMES[question.history]}</div>
+    <div class="ts-question-title">{html.escape(question.question)}</div>
+    <div class="ts-question-detail">{rich(question.detail, seen)}</div>
+  </div>
 </div>"""
-                )
-                st.button(
-                    "Find out",
-                    key=f"ask_{question.key}",
-                    on_click=ask,
-                    args=(question,),
-                    icon=":material/arrow_forward:",
-                    width="stretch",
-                )
+            )
+            st.button(
+                "Run this test  →",
+                key=f"ask_{question.key}",
+                on_click=ask,
+                args=(question,),
+                type="tertiary",
+            )
 
     steps = [
         (
-            "Pick a market and a rule.",
+            "Pick a market and a rule",
             "Any ticker on Yahoo Finance, one of seven classic strategies, or a rule you write yourself.",
         ),
         (
-            "Replay the past.",
-            "Every trade fills at the next day's price, after commission and slippage, as it "
-            "would have for real.",
+            "Replay the past",
+            "Every trade fills at the next day's price, after commission and slippage, as it would have "
+            "for real.",
         ),
         (
-            "Get a straight answer.",
-            "Did the rule beat just holding? Could it be luck? Would it have held up "
-            "on data it was never tuned on?",
+            "Get a straight answer",
+            "Did the rule beat just holding? Could it be luck? Would it have held up on data it was never "
+            "tuned on?",
         ),
     ]
     items = "".join(
         f'<div class="ts-step"><span class="ts-step-number">{number}</span>'
-        f"<span><strong>{title}</strong> {rich(text, seen)}</span></div>"
+        f"<div><strong>{title}</strong><p>{rich(text, seen)}</p></div></div>"
         for number, (title, text) in enumerate(steps, start=1)
     )
     st.html(
         f"""<div class="ts ts-how">
-  <div class="ts-section-title">Why this exists</div>
-  <p class="ts-why">Most trading ideas look great on a chart and then lose real money. The usual reasons
-  are hidden costs, hindsight and plain luck. TradStrat checks for all three, for free, before you risk
-  anything.</p>
-  <div class="ts-section-title">How it works</div>
+  <div class="ts-why">
+    <h3 class="ts-display">Why this exists</h3>
+    <p>Most trading ideas look great on a chart and then lose real money. The usual reasons are hidden
+    costs, hindsight and plain luck. TradStrat checks for all three, for free, before you risk anything.</p>
+  </div>
   <div class="ts-steps">{items}</div>
   <div class="ts-muted ts-small">Words with a dotted underline, like {rich("Sharpe ratio")}, explain
   themselves when you hover over or tap them.</div>
@@ -1720,14 +1790,14 @@ def main() -> None:
 
     header, ideas, actions = st.columns([5, 1.1, 1.4], vertical_alignment="center")
     with header:
-        render_header()
+        render_header(theme, tagline=started)
     if not started:
         render_landing(theme)
         render_footer()
         return
     write_link(inputs, st.session_state.get("_history_for_link"))
     ideas.button(
-        "Ideas to try", on_click=show_ideas, type="tertiary", icon=":material/lightbulb:", width="stretch"
+        "All questions", on_click=show_ideas, type="tertiary", icon=":material/arrow_back:", width="stretch"
     )
 
     if inputs.config is None:

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
+from streamlit.proto.NewSession_pb2 import CustomThemeConfig
+from streamlit.runtime.theme_util import parse_fonts_with_source
 from streamlit.testing.v1 import AppTest
 
 import tradstrat.data as data_module
@@ -213,7 +216,7 @@ def test_the_sidebar_route_and_ideas_button_switch_between_views() -> None:
     button(test, "Or set up your own test in the sidebar").click().run()
     assert [tab.label for tab in test.tabs] == TABS
 
-    button(test, "Ideas to try").click().run()
+    button(test, "All questions").click().run()
     assert "Start with a question" in rendered(test)
     assert not test.tabs
 
@@ -340,3 +343,12 @@ def test_a_failed_download_is_explained_calmly_and_offers_the_demo(monkeypatch: 
     button(test, "Use demo data instead").click().run()
 
     assert [tab.label for tab in test.tabs] == TABS
+
+
+def test_the_theme_config_is_one_streamlit_accepts() -> None:
+    """Regression: a font URL naming two families made Streamlit silently drop the whole theme."""
+    theme = tomllib.loads((Path(APP).parent / ".streamlit" / "config.toml").read_text())["theme"]
+
+    parse_fonts_with_source(
+        CustomThemeConfig(), theme.get("font"), theme.get("codeFont"), theme.get("headingFont"), "theme"
+    )

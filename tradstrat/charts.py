@@ -23,7 +23,7 @@ from tradstrat.strategies import STRATEGIES, BuyAndHoldStrategy
 # The two lines on every comparison chart, named as the dashboard's answer names them.
 RULE_NAME: Final[str] = "Your rule"
 HOLD_NAME: Final[str] = "Just holding"
-FONT_FAMILY: Final[str] = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif"
+FONT_FAMILY: Final[str] = "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif"
 MONTHS: Final[list[str]] = [
     "Jan",
     "Feb",
@@ -70,13 +70,13 @@ LIGHT: Final[ChartTheme] = ChartTheme(
     sell="#eb6834",
     positive="#2a78d6",
     negative="#e34948",
-    neutral="#f0efec",
-    ink="#0b0b0b",
-    secondary="#52514e",
+    neutral="#ece8de",
+    ink="#16140f",
+    secondary="#615d53",
     muted="#898781",
-    grid="#e1e0d9",
-    axis="#c3c2b7",
-    hover_background="#ffffff",
+    grid="#e4dfd3",
+    axis="#c9c2b2",
+    hover_background="#fbf9f4",
     series=("#2a78d6", "#1baf7a", "#eda100", "#e87ba4", "#6250d6", "#008300", "#e34948"),
 )
 DARK: Final[ChartTheme] = ChartTheme(
@@ -87,13 +87,13 @@ DARK: Final[ChartTheme] = ChartTheme(
     sell="#d95926",
     positive="#3987e5",
     negative="#e66767",
-    neutral="#383835",
-    ink="#f0efec",
-    secondary="#c3c2b7",
+    neutral="#3a362f",
+    ink="#ece6d8",
+    secondary="#c4bdae",
     muted="#898781",
-    grid="#2c2c2a",
-    axis="#383835",
-    hover_background="#1a1a19",
+    grid="#2a2722",
+    axis="#3a362f",
+    hover_background="#1f1d19",
     series=("#3987e5", "#199e70", "#c98500", "#d55181", "#9085e9", "#008300", "#e66767"),
 )
 
