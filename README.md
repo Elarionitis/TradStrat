@@ -11,6 +11,8 @@
 ![Coverage 90%+](https://img.shields.io/badge/coverage-90%25%2B-brightgreen)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
+<p><a href="https://tradstrat.streamlit.app"><strong>Try it live: tradstrat.streamlit.app</strong></a></p>
+
 </div>
 
 **What it is.** A free website that tests a trading rule, such as *"buy when the price goes above its
@@ -24,6 +26,8 @@ with no finance background can follow it.
 
 **Who it is for.** Anyone curious about whether a trading idea holds up, from first-time investors to
 people who build trading strategies.
+
+<a href="assets/tradstrat-tour.mp4"><img src="docs/images/tour-poster.png" alt="Watch the 40-second tour of TradStrat"></a>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/landing_dark.png">
