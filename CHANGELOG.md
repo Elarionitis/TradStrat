@@ -25,6 +25,12 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 - **A landing page built around questions.** The dashboard opens by explaining what it does in one sentence,
   beside an animated example, and offers six ready-made questions such as *"Does the famous golden cross beat
   the S&P 500?"*. One click runs the test on real prices.
+- **A stress test of every result.** A new tab answers six questions worth asking of any backtest: was the
+  market picked with hindsight, are the fills realistic, are all costs included (rerun with costs doubled),
+  does the result depend on the start date (equal windows starting in up to 120 different months), does it
+  still work without its 5 best trades, and did it survive a real bear market (every fall of 20% or more,
+  named when it is a well-known crash). The Results tab sums it up in one line, the HTML report includes it,
+  and `tradstrat stress` prints it.
 - **A 40-second tour.** A short video with an original soundtrack, on the landing page and in the README,
   shows the problem, a real test, a custom rule and the checks that decide whether to believe the result.
 - **Help for newcomers.** The dashboard states the rule being tested in one sentence, explains each built-in strategy

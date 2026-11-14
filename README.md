@@ -58,6 +58,9 @@ Pick a question, or set up your own test, and the answer comes back as a head-to
 - **See how fragile a result is.** Bootstrap intervals, the probabilistic and deflated Sharpe ratios, and the
   probability of backtest overfitting.
 - **Tune without fooling yourself.** Walk-forward validation only ever trades parameters chosen on the past.
+- **Stress-test it.** Every backtest answers six questions worth asking of any backtest you see online: was
+  the market picked with hindsight, are the fills realistic, are all costs included, does the result depend on
+  the start date, does it survive without its 5 best trades, and did it survive a real bear market.
 - **Share it.** The address bar always links to the exact test on screen, and a self-contained HTML report
   holds the interactive charts and the full trade log.
 
@@ -88,6 +91,7 @@ tradstrat report --ticker QQQ --strategy donchian --out reports/qqq.html
 tradstrat compare --ticker GLD
 tradstrat optimize --ticker SPY --strategy ma_crossover --points 6
 tradstrat walk-forward --ticker IWM --strategy momentum --train-bars 756 --test-bars 252
+tradstrat stress --ticker SPY --strategy trend_filter --start 1993-01-01
 tradstrat list
 ```
 
@@ -168,6 +172,12 @@ The whole study is reproduced by `python scripts/run_research.py`.
 - Probabilistic and deflated Sharpe ratios, against zero and against the benchmark
 - Probability of backtest overfitting, by combinatorially symmetric cross-validation
 - Walk-forward optimization, in sliding or anchored mode
+
+**A stress test of every result**
+- Start dates: the rule and holding over equal windows starting in up to 120 different months
+- Best trades: growth with the 5 best trades removed, and how much of the profit they brought in
+- Crashes: the rule against holding through each fall of 20% or more, named when it is a well-known one
+- Costs: commission and slippage doubled for both the rule and holding
 
 **Seven strategies, and your own**
 - Moving average crossover, 200-day trend filter, MACD crossover, Donchian breakout, time-series momentum,
@@ -256,9 +266,11 @@ flowchart LR
     G --> H[Probability of overfitting]
     G --> I[Walk-forward loop]
     I --> D
+    D --> S[Stress tests]
     E --> J[Dashboard, CLI and HTML report]
     F --> J
     H --> J
+    S --> J
 ```
 
 On each bar the engine does four things, in the order a live system would:
@@ -273,6 +285,10 @@ Joining those unseen windows gives an equity curve built only from decisions tha
 the time. The probability of backtest overfitting takes a different angle: it splits history into 16 blocks,
 tries all 12,870 ways of using half of them to pick a winner, and counts how often that winner lands in the
 bottom half on the other half.
+
+The stress test reruns a finished backtest in harder conditions. It starts the rule in many different months,
+removes its best trades, isolates every crash of 20% or more, and doubles the costs, then answers in plain
+words whether the result survived each one.
 
 The formulas and design decisions are in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
@@ -292,7 +308,7 @@ tests target the mistakes that matter most:
 - **Published results:** the deflated Sharpe code reproduces the numerical example in Bailey and
   Lopez de Prado (2014). The overfitting estimate is checked against cases with known answers: about 50% for
   pure noise, and close to 0% for a configuration with a real edge.
-- **The tests themselves:** `scripts/mutation_check.py` injects 33 realistic bugs and confirms that the
+- **The tests themselves:** `scripts/mutation_check.py` injects 37 realistic bugs and confirms that the
   suite catches each one.
 
 ```bash
@@ -349,6 +365,7 @@ tradstrat/
     metrics.py            Return, risk and trade statistics
     stats.py              Deflated Sharpe, block bootstrap and probability of overfitting
     validation.py         Parameter search, walk-forward validation and strategy comparison
+    stress.py             Start-date, best-trade, crash and cost stress tests
     reporting.py          Display formatting and the plain-English verdicts
     guide.py              Plain-English explanations of the built-in strategies
     glossary.py           Definitions, and the helper that shows them on hover
