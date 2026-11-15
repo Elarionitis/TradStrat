@@ -19,6 +19,8 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 - **Writing your own rule is one click away.** The sidebar and the landing page both offer *Ready-made* or
   *Write my own* side by side, instead of hiding your own rule at the bottom of the strategy list. A rule
   written on the landing page runs straight away, and switching back restores the strategy you had.
+- **Light theme by default.** The dashboard opens in its light theme on a first visit, even on a computer set
+  to dark mode. The dark theme is still in the settings menu, and a visitor who picks it keeps it.
 - **A notice when settings change.** Changing the market or rule in the sidebar updates every tab and says so.
 
 ### Changed

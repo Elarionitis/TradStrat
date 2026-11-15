@@ -950,7 +950,7 @@
   box-shadow: 0 24px 60px -18px rgba(0, 0, 0, .45), 0 2px 8px rgba(0, 0, 0, .08);
 }
 
-.st-key-tour_script {
+.st-key-tour_script, .st-key-theme_script {
   display: none;
 }
 

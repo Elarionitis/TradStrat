@@ -621,6 +621,32 @@ def inject_styles() -> None:
     st.html(f"<style>@import url('{HANDWRITING}');:root{{{variables}}}{tones}{STYLESHEET}</style>")
 
 
+def light_by_default() -> None:
+    """Open in the light theme until the visitor picks one in the settings menu.
+
+    With both a light and a dark theme configured, Streamlit follows the visitor's system and has no setting
+    for a default. It does remember the theme chosen in its menu, so a browser's first visit stores "Light"
+    as that choice and reloads once. A visitor who later picks Dark or System keeps it.
+    """
+    with st.container(key="theme_script"):
+        st.html(
+            """<script>
+(function () {
+  try {
+    const store = window.localStorage, key = "stActiveTheme-" + window.location.pathname + "-v2";
+    if (store.getItem("tradstrat-light-default")) return;
+    store.setItem("tradstrat-light-default", "1");
+    if (store.getItem(key) !== JSON.stringify("Light")) {
+      store.setItem(key, JSON.stringify("Light"));
+      window.location.reload();
+    }
+  } catch (error) {}
+})();
+</script>""",
+            unsafe_allow_javascript=True,
+        )
+
+
 def rich(text: str, seen: set[str] | None = None) -> str:
     """Explain glossary terms on hover, and turn **bold** markers into bold text."""
     return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", annotate(text, seen))
@@ -2500,6 +2526,7 @@ def main() -> None:
     st.set_page_config(page_title="TradStrat", page_icon=":material/monitoring:", layout="wide")
     theme = theme_for(st.context.theme.type == "dark")
     inject_styles()
+    light_by_default()
     side_top = st.sidebar.container()  # Above the settings, filled once it is known whether a test is open.
     restore_from_link()
     inputs = read_sidebar()
