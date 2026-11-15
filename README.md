@@ -27,11 +27,8 @@ with no finance background can follow it.
 **Who it is for.** Anyone curious about whether a trading idea holds up, from first-time investors to
 people who build trading strategies.
 
-<a href="https://tradstrat.streamlit.app"><img src="docs/images/tour.gif" alt="The 40-second tour of TradStrat: the problem with backtests, a real test, a custom rule and six stress tests"></a>
-
-<sub>The 40-second tour, without sound. For the version with music, open the
-<a href="https://tradstrat.streamlit.app">live app</a> and choose <em>Watch the 40-second tour</em>, or
-<a href="https://github.com/Elarionitis/TradStrat/raw/main/assets/tradstrat-tour.mp4">download the MP4</a>.</sub>
+▶ **[Watch the 40-second tour](https://tradstrat.streamlit.app)** on the live site, with its soundtrack, or
+[download it](https://github.com/Elarionitis/TradStrat/raw/main/assets/tradstrat-tour.mp4).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/landing_dark.png">

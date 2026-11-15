@@ -31,8 +31,8 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
   still work without its 5 best trades, and did it survive a real bear market (every fall of 20% or more,
   named when it is a well-known crash). The Results tab sums it up in one line, the HTML report includes it,
   and `tradstrat stress` prints it.
-- **A 40-second tour.** A short video with an original soundtrack, which plays with sound on the landing page
-  and as an animation in the README, shows the problem, a real test, a custom rule and the checks that decide whether to believe the result.
+- **A 40-second tour.** A short video with an original soundtrack, on the landing page and linked from the
+  README, shows the problem, a real test, a custom rule and the checks that decide whether to believe the result.
 - **Help for newcomers.** The dashboard states the rule being tested in one sentence, explains each built-in strategy
   in plain English, and defines jargon such as the Sharpe ratio on hover.
 - **A verdict on parameter searches** that combines the deflated Sharpe ratio and the probability of
