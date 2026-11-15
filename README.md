@@ -27,9 +27,6 @@ with no finance background can follow it.
 **Who it is for.** Anyone curious about whether a trading idea holds up, from first-time investors to
 people who build trading strategies.
 
-▶ **[Watch the 40-second tour](https://tradstrat.streamlit.app)** on the live site, with its soundtrack, or
-[download it](https://github.com/Elarionitis/TradStrat/raw/main/assets/tradstrat-tour.mp4).
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/landing_dark.png">
   <img src="docs/images/landing.png" alt="TradStrat opens with ready-made questions such as whether the golden cross beats the S&P 500">
