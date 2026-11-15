@@ -1952,8 +1952,10 @@ def main() -> None:
     started = has_started(inputs)
 
     header, ideas, actions = st.columns([5, 1.1, 1.4], vertical_alignment="center")
-    with header:
+    with header, st.container(key="home"):
         render_header(tagline=started)
+        # The wordmark leads home, as on most sites. The button is invisible and covers the header.
+        st.button("TradStrat home", key="go_home", on_click=show_ideas, type="tertiary")
     if not started:
         render_landing()
         render_footer()

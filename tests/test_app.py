@@ -248,6 +248,14 @@ def test_the_sidebar_route_and_ideas_button_switch_between_views() -> None:
     assert not test.tabs
 
 
+def test_the_wordmark_leads_back_to_the_landing_page(app: AppTest) -> None:
+    next(item for item in app.button if item.key == "go_home").click().run()
+
+    assert "Start with a question" in rendered(app)
+    assert not app.tabs
+    assert not app.query_params
+
+
 def test_every_strategy_is_explained_in_the_guide(app: AppTest) -> None:
     rendered = " ".join(str(element.proto) for element in app.get("html"))
 
