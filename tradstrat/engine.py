@@ -7,7 +7,7 @@ The engine walks through history one bar at a time, as a live trading system wou
 3. At the close it marks the position to market.
 
 Because a signal is always filled on the following bar, a strategy cannot trade on a price it used to
-make the decision. Fills pay slippage and commission, and only whole shares are traded. Uninvested cash
+make the decision. Fills pay slippage and commission, and fractional shares are allowed. Uninvested cash
 earns interest at the cash rate, which is also the risk-free rate that Sharpe ratios are measured against.
 """
 
@@ -100,7 +100,7 @@ class _Book:
     cash: float
     commission_rate: float
     slippage: float
-    shares: int = 0
+    shares: float = 0.0
     entry_price: float = 0.0
     peak_price: float = 0.0
     entry_commission: float = 0.0
@@ -110,11 +110,13 @@ class _Book:
 
     def buy(self, bar: int, date: pd.Timestamp, price: float, budget: float) -> None:
         fill = price * (1 + self.slippage)
-        shares = int(budget / (fill * (1 + self.commission_rate)))
+        # Fractional shares, as brokers and funds offer, so an asset priced above the budget, such as an index
+        # quoted in the tens of thousands, is still fully invested rather than left mostly in cash.
+        shares = budget / (fill * (1 + self.commission_rate))
         if shares <= 0:
             return
         commission = shares * fill * self.commission_rate
-        self.cash -= shares * fill + commission
+        self.cash = max(self.cash - shares * fill - commission, 0.0)  # Rounding never goes below zero.
         self.shares = shares
         self.entry_price = fill
         self.peak_price = fill
@@ -142,7 +144,7 @@ class _Book:
                 "Exit Reason": reason,
             }
         )
-        self.shares = 0
+        self.shares = 0.0
         self.entry_date = None
 
 
@@ -273,14 +275,13 @@ def _simulate(data: pd.DataFrame, signal: np.ndarray, config: BacktestConfig, st
     )
     equity = np.empty(bars)
     cash = np.empty(bars)
-    position = np.empty(bars, dtype=int)
+    position = np.empty(bars)
     interest = np.zeros(bars)
     stopped_out = False
 
     for step, bar in enumerate(range(baseline, len(data))):
         if bar > baseline:
-            # Overnight interest on cash, credited before the open. A fully invested book earns only on
-            # the few dollars left over after buying whole shares.
+            # Overnight interest on cash, credited before the open. A fully invested book holds no cash.
             if book.cash > 0:
                 interest[step] = book.cash * period_rates[bar]
                 book.cash += interest[step]

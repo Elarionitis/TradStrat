@@ -8,7 +8,9 @@ A signal formed at the close of bar `t` is filled at the open of bar `t + 1`. Be
 fill happen on different bars, a strategy cannot trade at a price it used to make the decision.
 
 **Fills.** A buy fills at `open * (1 + slippage)` and a sale at `open * (1 - slippage)`. Commission is a
-percentage of the traded value, charged on both sides. Only whole shares are traded.
+percentage of the traded value, charged on both sides. Fractional shares are allowed, as most brokers now
+offer, so an asset quoted above the starting capital, such as an index in the tens of thousands, is still
+fully invested rather than left mostly in cash.
 
 **Stops.** A stop rests at `entry * (1 - stop_loss)`. If the bar's low reaches it, the fill is the lower of
 the stop price and the open. Without the open, a gap through the stop would fill at a price that never

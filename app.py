@@ -1625,6 +1625,7 @@ def render_trades(result: BacktestResult, prices: pd.DataFrame, inputs: Inputs, 
             "Exit Date": st.column_config.DateColumn(format="YYYY-MM-DD"),
             "Entry Price": st.column_config.NumberColumn(format="%.2f"),
             "Exit Price": st.column_config.NumberColumn(format="%.2f"),
+            "Size": st.column_config.NumberColumn(format="%.4g"),
             "Commission": st.column_config.NumberColumn(format="dollar"),
             "P&L": st.column_config.NumberColumn(format="dollar"),
             "Return": st.column_config.NumberColumn(format="percent"),
@@ -1863,7 +1864,7 @@ def render_guide() -> None:
         section("How TradStrat tests an idea")
         steps = [
             "**It trades the way you could have.** A signal formed at one day's close trades at the next "
-            "day's open, after commission and slippage, in whole shares. Prices include dividends and idle "
+            "day's open, after commission and slippage. Prices include dividends and idle "
             "cash earns Treasury bill yields.",
             "**It compares with doing nothing clever.** Buy and hold runs through the same simulator with "
             "the same costs. A strategy only counts if it beats that.",

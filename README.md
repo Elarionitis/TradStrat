@@ -165,7 +165,8 @@ The whole study is reproduced by `python scripts/run_research.py`.
 
 **An honest simulation**
 - Signals fill at the next bar's open, so no decision can use its own price
-- Commission, slippage and whole-share sizing
+- Commission, slippage, and fractional shares, so even an index quoted in the tens of thousands is fully
+  invested
 - Fixed and trailing stop-losses that fill at the open when the market gaps through them
 - Volatility-targeted position sizing
 - Idle cash earns a fixed rate or the real 13-week Treasury bill yield

@@ -55,12 +55,13 @@ def test_commission_and_slippage_match_hand_calculation() -> None:
     trade = result.trade_log.iloc[0]
 
     buy_fill = 100 * 1.01
-    size = int(10_000 / (buy_fill * 1.01))
+    size = 10_000 / (buy_fill * 1.01)
     sell_fill = 110 * 0.99
     commission = size * buy_fill * 0.01 + size * sell_fill * 0.01
     expected_profit = (sell_fill - buy_fill) * size - commission
 
-    assert trade["Size"] == size == 98
+    assert trade["Size"] == pytest.approx(size)
+    assert trade["Size"] == pytest.approx(98.03, abs=0.01)
     assert trade["Entry Price"] == pytest.approx(buy_fill)
     assert trade["Exit Price"] == pytest.approx(sell_fill)
     assert trade["Commission"] == pytest.approx(commission)
@@ -105,12 +106,14 @@ def test_no_signal_means_no_trades_and_flat_equity() -> None:
     assert (result.results["Strategy Equity"] == 10_000.0).all()
 
 
-def test_capital_too_small_for_one_share_never_trades() -> None:
-    data = make_bars([500.0, 500, 500, 500])
+def test_an_asset_priced_above_the_capital_is_still_fully_invested() -> None:
+    """Regression guard: whole shares bought one unit of a 6,000 index with $10,000, leaving 40% in cash."""
+    data = make_bars([6_000.0, 6_000, 6_600, 6_600])
 
-    result = run_backtest(data, FixedSignal((1, 1, 1, 1)), BacktestConfig(initial_capital=100.0))
+    result = run_backtest(data, FixedSignal((1, 1, 1, 1)), BacktestConfig(initial_capital=10_000.0))
 
-    assert result.trade_log.empty
+    assert result.results["Cash"].iloc[1] == pytest.approx(0.0)
+    assert result.results["Strategy Equity"].iloc[2] == pytest.approx(11_000, rel=0.01)
 
 
 def test_benchmark_equals_an_always_long_strategy() -> None:
