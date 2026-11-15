@@ -27,7 +27,11 @@ with no finance background can follow it.
 **Who it is for.** Anyone curious about whether a trading idea holds up, from first-time investors to
 people who build trading strategies.
 
-<a href="assets/tradstrat-tour.mp4"><img src="docs/images/tour-poster.png" alt="Watch the 40-second tour of TradStrat"></a>
+<a href="https://tradstrat.streamlit.app"><img src="docs/images/tour.gif" alt="The 40-second tour of TradStrat: the problem with backtests, a real test, a custom rule and six stress tests"></a>
+
+<sub>The 40-second tour, without sound. For the version with music, open the
+<a href="https://tradstrat.streamlit.app">live app</a> and choose <em>Watch the 40-second tour</em>, or
+<a href="https://github.com/Elarionitis/TradStrat/raw/main/assets/tradstrat-tour.mp4">download the MP4</a>.</sub>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/landing_dark.png">
@@ -39,6 +43,15 @@ Pick a question, or set up your own test, and the answer comes back as a head-to
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard_dark.png">
   <img src="docs/images/dashboard.png" alt="TradStrat results: the golden cross against just holding SPY">
+</picture>
+
+The golden cross had a smoother ride, but just holding SPY made more money. The Stress test tab then asks the
+same result six harder questions, and here the rule passes only 2 of 4: it beat holding from just 8% of start
+dates, and without its 5 best trades it grows 1.3% a year instead of 8.6%.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/stress_dark.png">
+  <img src="docs/images/stress.png" alt="The stress test of the golden cross on SPY: passed 2 of 4 stress tests">
 </picture>
 
 ## What You Can Do With It
@@ -186,8 +199,8 @@ The whole study is reproduced by `python scripts/run_research.py`.
 - A registry that gives a new strategy the dashboard, CLI, optimizer and look-ahead tests with no extra code
 
 **Three ways to use it**
-- A Streamlit dashboard with light and dark themes, a short welcome for first-time visitors, definitions
-  on hover, and links that reopen the exact test
+- A Streamlit dashboard with light and dark themes, a short welcome and a 40-second tour for first-time
+  visitors, definitions on hover, and links that reopen the exact test
 - A command-line interface
 - Self-contained HTML reports
 

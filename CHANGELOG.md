@@ -31,8 +31,8 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
   still work without its 5 best trades, and did it survive a real bear market (every fall of 20% or more,
   named when it is a well-known crash). The Results tab sums it up in one line, the HTML report includes it,
   and `tradstrat stress` prints it.
-- **A 40-second tour.** A short video with an original soundtrack, on the landing page and in the README,
-  shows the problem, a real test, a custom rule and the checks that decide whether to believe the result.
+- **A 40-second tour.** A short video with an original soundtrack, which plays with sound on the landing page
+  and as an animation in the README, shows the problem, a real test, a custom rule and the checks that decide whether to believe the result.
 - **Help for newcomers.** The dashboard states the rule being tested in one sentence, explains each built-in strategy
   in plain English, and defines jargon such as the Sharpe ratio on hover.
 - **A verdict on parameter searches** that combines the deflated Sharpe ratio and the probability of
@@ -51,8 +51,10 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 - A new look for the dashboard and the HTML report, in the style of a research note: a serif for headlines,
   a plain sans for reading, mono for figures, warm paper and ink colors, and hairline rules in place of
   floating cards. The landing illustration is drawn from a real trend rule on simulated prices, and the
-  questions read as a numbered index. "All questions" leads back from any result.
+  questions read as a numbered index. "All questions", or the TradStrat name, leads back from any result.
 
+- Colors follow the theme on screen, even right after a switch between light and dark, and the live site
+  picks up new code without a restart.
 - Ready to run as a public website: friendly messages instead of raw errors when prices can't be loaded,
   with a one-click switch to demo data; size limits on every cache, rule and upload; no tracebacks shown to
   visitors; and a Dockerfile with a health check.
