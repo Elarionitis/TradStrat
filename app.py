@@ -1455,6 +1455,26 @@ text{{fill:{muted};font:500 10.5px ui-monospace,SFMono-Regular,Menlo,monospace}}
     )
 
 
+def start_here() -> str:
+    """A handwritten note with a curved arrow, pointing a newcomer at the first question."""
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 70" width="96" height="70">
+<style>{svg_palette("accent")}
+path{{fill:none;stroke:var(--accent);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}}
+.line{{stroke-dasharray:1;stroke-dashoffset:1;animation:draw .8s cubic-bezier(.5,.05,.25,1) 1s forwards}}
+.head{{opacity:0;animation:show .2s ease 1.75s forwards}}
+@keyframes draw{{to{{stroke-dashoffset:0}}}} @keyframes show{{to{{opacity:1}}}}
+@media (prefers-reduced-motion:reduce){{.line,.head{{animation:none;stroke-dashoffset:0;opacity:1}}}}
+</style>
+<path class="line" pathLength="1" d="M90,10 C60,6 24,16 14,60"/>
+<path class="head" d="M5,50 L14,61 L22,49"/></svg>"""
+    arrow = base64.b64encode(svg.encode()).decode()
+    return (
+        '<div class="ts-start-here" aria-hidden="true">'
+        f'<img src="data:image/svg+xml;base64,{arrow}" width="96" height="70" alt="">'
+        "<span>Start here: one click, real prices</span></div>"
+    )
+
+
 def render_landing() -> None:
     """The first screen: what TradStrat is for, in plain words, and questions to start from."""
     seen: set[str] = set()
@@ -1488,7 +1508,7 @@ def render_landing() -> None:
     st.html(
         '<div class="ts ts-landing-head ts-rise ts-anchor" id="questions" style="--delay:.25s">'
         '<h3 class="ts-display">Start with a question</h3><div class="ts-muted">Six classic ideas. Pick one '
-        "and it runs on real prices in a few seconds.</div></div>"
+        f"and it runs on real prices in a few seconds.</div>{start_here()}</div>"
     )
     # Questions rise one after another. Their containers are Streamlit's, so each gets its place by key.
     order = "".join(f".st-key-question_{q.key}{{--order:{n}}}" for n, q in enumerate(QUESTIONS))

@@ -887,6 +887,43 @@
   color: var(--ts-muted);
 }
 
+/* The homepage's one hint: a handwritten note and arrow pointing at the first question. */
+
+.ts-landing-head {
+  position: relative;
+}
+
+.ts-start-here {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 0 -18px 2px;
+  pointer-events: none;
+  font-family: "Caveat", "Segoe Print", "Bradley Hand", cursive;
+  font-size: 23px;
+  font-weight: 600;
+  line-height: 1.05;
+  color: var(--ts-accent);
+  animation: ts-hint-in .6s var(--ts-ease) .7s backwards;
+}
+
+.ts-start-here img {
+  animation: ts-hint-nudge 2.6s ease-in-out 2.2s infinite;
+}
+
+.ts-start-here span {
+  padding-top: 0;
+}
+
+@keyframes ts-hint-in {
+  from { opacity: 0; translate: 0 6px; }
+}
+
+@keyframes ts-hint-nudge {
+  50% { translate: -3px 3px; }
+}
+
+
 /* The guided tour: one card at a time, a spotlight on what it explains, and a hand-drawn arrow between. */
 
 .st-key-tour {
@@ -1332,7 +1369,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ts *, .ts, [class*="st-key-question_"], [class*="st-key-ask_"] button, .stTabs [data-baseweb="tab-panel"],
-  [class*="st-key-next_"], .st-key-tour, #ts-tour-overlay * {
+  [class*="st-key-next_"], .st-key-tour, #ts-tour-overlay *, .ts-start-here, .ts-start-here img {
     animation: none !important;
     transition: none !important;
   }
