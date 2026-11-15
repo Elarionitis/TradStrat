@@ -40,6 +40,14 @@ def app() -> AppTest:
     return test
 
 
+def open_tab(app: AppTest, name: str) -> AppTest:
+    """Only the open tab is built, so a test opens the one it reads."""
+    app.session_state["view"] = name
+    app.run()
+    assert not app.exception
+    return app
+
+
 def button(app: AppTest, label: str):
     return next(item for item in app.button if item.label == label)
 
@@ -143,6 +151,7 @@ def test_a_fixed_cash_rate_is_credited_to_idle_cash(app: AppTest) -> None:
 
 
 def test_search_results_persist_across_reruns(app: AppTest) -> None:
+    open_tab(app, "Tune")
     button(app, "Run search").click().run()
     assert not app.exception
     assert {"Chance the edge is real", "Chance it is overfit"} <= metric_labels(app)
@@ -154,6 +163,7 @@ def test_search_results_persist_across_reruns(app: AppTest) -> None:
 
 def test_search_results_are_cleared_when_the_settings_change(app: AppTest) -> None:
     """A search on one set of costs must not be shown as if it applied to another."""
+    open_tab(app, "Tune")
     button(app, "Run search").click().run()
 
     {item.label: item for item in app.sidebar.number_input}["Slippage (bps)"].set_value(30.0).run()
@@ -162,6 +172,7 @@ def test_search_results_are_cleared_when_the_settings_change(app: AppTest) -> No
 
 
 def test_walk_forward_reports_out_of_sample_results(app: AppTest) -> None:
+    open_tab(app, "Tune")
     button(app, "Run walk-forward").click().run()
 
     assert not app.exception
@@ -170,6 +181,7 @@ def test_walk_forward_reports_out_of_sample_results(app: AppTest) -> None:
 
 def test_impossible_walk_forward_window_shows_an_error(app: AppTest) -> None:
     """A six-month training window cannot warm up a grid whose long average reaches 300 days."""
+    open_tab(app, "Tune")
     {item.label: item for item in app.select_slider}["Choose settings using"].set_value("6 months").run()
 
     button(app, "Run walk-forward").click().run()
@@ -179,6 +191,7 @@ def test_impossible_walk_forward_window_shows_an_error(app: AppTest) -> None:
 
 
 def test_compare_tab_lists_every_strategy(app: AppTest) -> None:
+    open_tab(app, "Compare")
     table = app.dataframe[-1].value
 
     assert set(table["Strategy"]) >= {"Buy and Hold", "RSI Reversal", "Donchian Breakout"}
@@ -237,15 +250,55 @@ def test_a_question_runs_its_test_on_market_data(monkeypatch: pytest.MonkeyPatch
     assert test.query_params["ticker"] == "BTC-USD"
 
 
-def test_the_sidebar_route_and_ideas_button_switch_between_views() -> None:
+def test_the_landing_test_and_ideas_button_switch_between_views() -> None:
     test = landing()
 
-    button(test, "Or set up your own test in the sidebar").click().run()
+    next(item for item in test.button if item.key == "compose_run").click().run()
     assert [tab.label for tab in test.tabs] == TABS
 
     button(test, "All questions").click().run()
     assert "Start with a question" in rendered(test)
     assert not test.tabs
+
+
+def test_the_composer_runs_the_market_rule_and_history_you_picked(monkeypatch: pytest.MonkeyPatch) -> None:
+    sample = load_sample()
+    monkeypatch.setattr(data_module, "PROVIDERS", (("stub", lambda *_: sample),))
+    test = landing()
+
+    test.session_state["compose_symbol"] = "tsla"
+    test.session_state["compose_strategy"] = "rsi"
+    test.session_state["compose_history"] = "5Y"
+    next(item for item in test.button if item.key == "compose_run").click().run()
+
+    assert not test.exception
+    assert test.session_state["ticker"] == "TSLA"
+    assert test.session_state["strategy"] == "rsi"
+    assert test.session_state["history"] == "5Y"
+    assert [tab.label for tab in test.tabs] == TABS
+
+
+def test_each_tab_ends_with_the_next_step(app: AppTest) -> None:
+    assert 'class=\\"ts-coach ' in rendered(app)
+
+    next(item for item in app.button if item.key == "go_results").click().run()
+
+    assert app.session_state["view"] == "Stress test"
+    assert "Results" in app.session_state["visited"]
+    assert "Then see if it survives" not in rendered(app)
+
+
+def test_tips_can_be_hidden(app: AppTest) -> None:
+    next(item for item in app.button if item.key == "hide_tips").click().run()
+
+    assert 'class=\\"ts-coach ' not in rendered(app)
+    assert not [item for item in app.button if item.key == "hide_tips"]
+
+
+def test_a_sidebar_change_after_the_start_is_announced(app: AppTest) -> None:
+    app.sidebar.selectbox[0].set_value("custom").run()
+
+    assert [toast.value for toast in app.toast if toast.value.startswith("Updated:")]
 
 
 def test_the_wordmark_leads_back_to_the_landing_page(app: AppTest) -> None:
@@ -257,6 +310,7 @@ def test_the_wordmark_leads_back_to_the_landing_page(app: AppTest) -> None:
 
 
 def test_every_strategy_is_explained_in_the_guide(app: AppTest) -> None:
+    open_tab(app, "Guide")
     rendered = " ".join(str(element.proto) for element in app.get("html"))
 
     for phrase in ("Buys when", "Sells when", "Tends to struggle in"):
@@ -283,6 +337,7 @@ def test_a_custom_rule_runs_through_every_tab(app: AppTest) -> None:
     assert not app.error
     text = rendered(app)
     assert "50-day average price crosses above its 200-day average price" in text
+    open_tab(app, "Compare")
     tables = [frame.value for frame in app.dataframe if "Style" in frame.value.columns]
     assert "Your own rule" in tables[0]["Strategy"].tolist()
 
@@ -310,6 +365,7 @@ def test_an_unreadable_rule_shows_how_to_fix_it(app: AppTest) -> None:
 
 def test_a_custom_rule_can_be_tuned(app: AppTest) -> None:
     app.sidebar.selectbox[0].set_value("custom").run()
+    open_tab(app, "Tune")
     app.tabs[3].slider[0].set_value(3)
     button(app, "Run search").click().run()
 
@@ -401,6 +457,7 @@ def test_newcomers_can_watch_the_tour_from_the_landing_page() -> None:
 
 
 def test_the_stress_test_answers_six_questions(app: AppTest) -> None:
+    open_tab(app, "Stress test")
     rendered = " ".join(str(element.proto) for element in app.get("html"))
 
     for question in (

@@ -723,7 +723,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
   gap: 12px 40px;
-  margin-top: 30px;
+  margin-top: 34px;
   padding: 26px 0 8px;
   border-top: 2px solid var(--ts-ink);
 }
@@ -760,6 +760,285 @@
   font-weight: 600;
   line-height: 1;
   color: var(--ts-rule);
+}
+
+/* Hero calls to action: plain links that glide to a section of the page. */
+
+.ts-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  align-items: center;
+  margin: 2px 0 18px;
+}
+
+.ts-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: var(--ts-radius);
+  background: var(--ts-accent);
+  color: #fff !important;
+  font-weight: 600;
+  text-decoration: none !important;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .08);
+  transition: transform .2s var(--ts-ease), box-shadow .2s var(--ts-ease);
+}
+
+.ts-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px -8px var(--ts-accent);
+}
+
+.ts-cta-quiet {
+  color: var(--ts-accent) !important;
+  font-weight: 600;
+  text-decoration: none !important;
+}
+
+.ts-cta-quiet:hover {
+  text-decoration: underline !important;
+}
+
+[data-testid="stMain"] {
+  scroll-behavior: smooth;
+}
+
+.ts-anchor {
+  scroll-margin-top: 96px;
+}
+
+/* "Test your own idea": the landing page's three choices and one button. */
+
+.st-key-compose {
+  margin-top: 34px;
+  padding: 26px 28px 22px;
+  border: 1px solid var(--ts-border);
+  border-radius: 10px;
+  background: var(--ts-surface);
+  gap: 14px;
+}
+
+.ts-compose-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: var(--ts-ink);
+}
+
+.ts-compose-step span, .ts-side-step span {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--ts-accent);
+  color: #fff;
+  font: 600 12px/1 var(--ts-sans);
+  flex: none;
+}
+
+.st-key-compose_market [data-testid="stButtonGroup"] > div {
+  flex-wrap: wrap !important;
+  overflow: visible !important;
+}
+
+.ts-compose-hint {
+  font-size: 13px;
+  color: var(--ts-muted);
+  margin-top: 4px;
+}
+
+.st-key-compose_run button {
+  padding: 10px 26px;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.st-key-compose_run button p {
+  font-size: 16px;
+}
+
+.ts-compose-after {
+  font-size: 14px;
+  color: var(--ts-muted);
+}
+
+/* Sidebar steps. */
+
+.ts-side-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--ts-serif);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ts-ink);
+  margin: 2px 0 2px;
+}
+
+.ts-side-step small {
+  font-family: var(--ts-sans);
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--ts-muted);
+}
+
+/* Coach marks: handwritten notes with drawn arrows that point at what to look at next. */
+
+.ts-coach {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-family: "Caveat", "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--ts-accent);
+  pointer-events: none;
+  animation: ts-coach-in .7s var(--ts-ease) .5s both;
+}
+
+.ts-coach-arrow {
+  flex: none;
+  animation: ts-nudge 2.4s ease-in-out 1.6s infinite;
+}
+
+.ts-coach-text {
+  max-width: 270px;
+  padding-top: 2px;
+}
+
+.ts-answer-head {
+  position: relative;
+  container-type: inline-size;
+}
+
+.ts-coach-verdict {
+  position: absolute;
+  left: min(560px, 58%);
+  top: 18px;
+  flex-direction: row;
+  align-items: center;
+}
+
+@container (max-width: 860px) {
+  .ts-coach-verdict {
+    display: none;
+  }
+}
+
+.st-key-coach_tabs {
+  height: 58px;
+  margin-bottom: -22px;
+  padding-left: 96px;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.st-key-coach_tabs [data-testid="stElementContainer"]:has(.ts-coach) {
+  width: auto !important;
+}
+
+.st-key-hide_tips button {
+  pointer-events: auto;
+  font-size: 13px;
+  color: var(--ts-muted);
+  padding: 2px 0;
+  min-height: 0;
+  margin-top: 8px;
+}
+
+.st-key-hide_tips button p {
+  font-size: 13px;
+}
+
+.ts-coach-side {
+  margin: 0 0 10px 6px;
+}
+
+@keyframes ts-coach-in {
+  from { opacity: 0; transform: translateY(6px) rotate(-1deg); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes ts-nudge {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-3px, 3px); }
+}
+
+/* Numbered tabs: each step of the journey shows its number, and a tick once it has been seen. */
+
+.st-key-view [role="tablist"] {
+  counter-reset: step;
+}
+
+.st-key-view [data-testid="stTab"]:not(:last-child)::before {
+  counter-increment: step;
+  content: counter(step);
+  display: inline-grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  margin-right: 7px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  font: 600 11px/1 var(--ts-sans);
+  opacity: .75;
+}
+
+.st-key-view [data-testid="stTab"][aria-selected="true"]::before {
+  background: var(--ts-accent);
+  border-color: var(--ts-accent);
+  color: #fff;
+  opacity: 1;
+}
+
+.st-key-view {
+  scroll-margin-top: 12px;
+}
+
+/* What to do next, at the end of each tab. */
+
+[class*="st-key-next_"] {
+  margin-top: 30px;
+  padding: 20px 24px;
+  border: 1px solid var(--ts-border);
+  border-left: 3px solid var(--ts-accent);
+  border-radius: 8px;
+  background: var(--ts-surface);
+  gap: 12px;
+  animation: ts-rise .5s var(--ts-ease) both;
+}
+
+.ts-next-kicker {
+  font-family: var(--ts-mono);
+  font-size: 11.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ts-accent);
+}
+
+.ts-next-title {
+  font-family: var(--ts-serif);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 4px 0 4px;
+  color: var(--ts-ink);
+}
+
+.ts-next p {
+  margin: 0 !important;
+  color: var(--ts-muted);
+  max-width: 70ch;
+}
+
+.st-key-scripts {
+  display: none;
 }
 
 /* Streamlit's own pieces, nudged to match. */
@@ -921,6 +1200,27 @@
 }
 
 @media (max-width: 640px) {
+  .st-key-compose {
+    padding: 20px 16px 18px;
+  }
+
+  .st-key-coach_tabs {
+    padding-left: 104px;
+  }
+
+  .st-key-coach_tabs .ts-coach-text {
+    max-width: 150px;
+    font-size: 19px;
+  }
+
+  .st-key-hide_tips {
+    display: none;
+  }
+
+  [class*="st-key-next_"] {
+    padding: 16px;
+  }
+
   .ts-round, .ts-round:first-child {
     border-left: none;
     padding-left: 0;
@@ -951,7 +1251,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ts *, .ts, [class*="st-key-question_"], [class*="st-key-ask_"] button, .stTabs [data-baseweb="tab-panel"] {
+  .ts *, .ts, [class*="st-key-question_"], [class*="st-key-ask_"] button, .stTabs [data-baseweb="tab-panel"],
+  [class*="st-key-next_"], .ts-coach, .ts-coach-arrow {
     animation: none !important;
     transition: none !important;
   }

@@ -142,7 +142,28 @@ RULE_OPERATORS: Final[list[tuple[str, str]]] = [
     ("crosses below", "Was at or above yesterday, and is below today."),
     ("and, or", "Combine conditions: all must hold, or any one is enough."),
 ]
-QUICK_TICKERS: Final[list[str]] = ["SPY", "QQQ", "AAPL", "NVDA", "BTC-USD", "GLD"]
+QUICK_TICKERS: Final[list[str]] = ["SPY", "QQQ", "^NSEI", "AAPL", "NVDA", "BTC-USD", "GLD"]
+# Index symbols read badly in a sentence, so the well-known ones are named.
+TICKER_NAMES: Final[dict[str, str]] = {
+    "^NSEI": "Nifty 50",
+    "^NSEBANK": "Bank Nifty",
+    "^BSESN": "Sensex",
+    "^GSPC": "S&P 500",
+    "^IXIC": "Nasdaq",
+    "^DJI": "Dow Jones",
+    "^FTSE": "FTSE 100",
+    "^N225": "Nikkei 225",
+}
+# The landing page names markets the way people say them.
+MARKETS: Final[dict[str, str]] = {
+    "SPY": "S&P 500",
+    "QQQ": "Nasdaq 100",
+    "^NSEI": "Nifty 50",
+    "BTC-USD": "Bitcoin",
+    "AAPL": "Apple",
+    "GLD": "Gold",
+}
+COMPOSE_HISTORIES: Final[list[str]] = ["5Y", "10Y", "20Y", "Max"]
 PERIODS: Final[dict[str, int | None]] = {"1Y": 1, "3Y": 3, "5Y": 5, "10Y": 10, "20Y": 20, "Max": None}
 PERIOD_NAMES: Final[dict[str, str]] = {
     "1Y": "1 year",
@@ -164,6 +185,34 @@ TRAIN_WINDOWS: Final[dict[str, int]] = {
 }
 TEST_WINDOWS: Final[dict[str, int]] = {"3 months": 63, "6 months": 126, "1 year": 252, "2 years": 504}
 TABS: Final[list[str]] = ["Results", "Stress test", "Trades", "Tune", "Compare", "Guide"]
+# Each tab ends by pointing to the next one: (next tab, title, why, button).
+NEXT_STEPS: Final[dict[str, tuple[str, str, str, str]]] = {
+    "Results": (
+        "Stress test",
+        "Put it under stress",
+        "One backtest is one path through history. See whether this result survives doubled costs, 120 "
+        "different start dates, losing its 5 best trades, and real crashes.",
+        "Run the stress test",
+    ),
+    "Stress test": (
+        "Trades",
+        "See every trade",
+        "Where the rule bought and sold, drawn on the price with the lines it was watching.",
+        "Show the trades",
+    ),
+    "Trades": (
+        "Tune",
+        "Tune it, honestly",
+        "Search for better settings, then check them on years they were never tuned on.",
+        "Tune the settings",
+    ),
+    "Tune": (
+        "Compare",
+        "Compare every strategy",
+        "All seven classic strategies on the same market, with the same costs, side by side.",
+        "Compare strategies",
+    ),
+}
 TONE_MARKS: Final[dict[str, str]] = {"good": "✓", "warning": "!", "bad": "✕", "neutral": "•"}
 PALETTE: Final[dict[str, dict[str, str]]] = {
     "light": {
@@ -210,6 +259,7 @@ PALETTE: Final[dict[str, dict[str, str]]] = {
 ASSETS: Final[Path] = Path(__file__).parent / "assets"
 TOUR: Final[Path] = ASSETS / "tradstrat-tour.mp4"
 STYLESHEET: Final[str] = (ASSETS / "dashboard.css").read_text()
+HANDWRITING: Final[str] = "https://fonts.googleapis.com/css2?family=Caveat:wght@600&display=swap"
 
 
 @dataclass(frozen=True)
@@ -375,7 +425,7 @@ def inject_styles() -> None:
         f".ts-tone-{tone}{{--tone:{either(tone)};--wash:{either(tone + '-wash')};}}"
         for tone in ("good", "warning", "bad", "neutral")
     )
-    st.html(f"<style>:root{{{variables}}}{tones}{STYLESHEET}</style>")
+    st.html(f"<style>@import url('{HANDWRITING}');:root{{{variables}}}{tones}{STYLESHEET}</style>")
 
 
 def rich(text: str, seen: set[str] | None = None) -> str:
@@ -519,7 +569,13 @@ def has_started(inputs: Inputs) -> bool:
     previous = state.get("last_inputs")
     state["last_inputs"] = fingerprint
     if previous is not None and previous != fingerprint:
-        state["started"] = True
+        if state.get("started"):
+            # Results update in place, so say so: a quiet change is easy to miss.
+            state["changed_since_start"] = True
+            name = "your rule" if inputs.strategy_key == CUSTOM else STRATEGIES[inputs.strategy_key].label
+            st.toast(f"Updated: {name} on {inputs.label}", icon=":material/autorenew:")
+        else:
+            start()
     return bool(state.get("started"))
 
 
@@ -574,7 +630,7 @@ def write_link(inputs: Inputs, history: str | None) -> None:
 def read_sidebar() -> Inputs:
     today = pd.Timestamp.today().normalize()
     with st.sidebar:
-        st.subheader("Market")
+        st.html('<div class="ts-side-step"><span>1</span>Market</div>')
         st.session_state.setdefault("source", "Yahoo")
         source = st.segmented_control(
             "Data source",
@@ -598,6 +654,7 @@ def read_sidebar() -> Inputs:
             st.pills(
                 "Popular",
                 QUICK_TICKERS,
+                format_func=lambda ticker: TICKER_NAMES.get(ticker, ticker),
                 key="ticker_pick",
                 on_change=_pick_ticker,
                 label_visibility="collapsed",
@@ -611,7 +668,8 @@ def read_sidebar() -> Inputs:
                 end = pd.Timestamp(right.date_input("End", value=today))
             else:
                 start, end = (today - pd.DateOffset(years=years) if years else EARLIEST), today
-            label = ticker.strip().upper() or "?"
+            symbol = ticker.strip().upper()
+            label = TICKER_NAMES.get(symbol, symbol) or "?"
         elif source == "CSV":
             upload = st.file_uploader(
                 "Price file",
@@ -625,7 +683,7 @@ def read_sidebar() -> Inputs:
                 "A simulated market for trying the app offline. Its results say nothing about real ones."
             )
 
-        st.subheader("Strategy")
+        st.html('<div class="ts-side-step"><span>2</span>Strategy</div>')
         strategy_key = st.selectbox(
             "Strategy",
             STRATEGY_CHOICES,
@@ -647,6 +705,7 @@ def read_sidebar() -> Inputs:
             params = {spec.name: param_widget(strategy_key, spec) for spec in STRATEGIES[strategy_key].params}
 
         st.space("small")
+        st.html('<div class="ts-side-step"><span>3</span>Fine-tune <small>optional</small></div>')
         with st.expander("Advanced settings"):
             st.caption("The defaults are realistic for a low-cost US broker.")
             capital = st.number_input("Starting capital ($)", min_value=1_000.0, value=10_000.0, step=1_000.0)
@@ -927,7 +986,14 @@ def ask(question: Question) -> None:
 
 
 def start() -> None:
-    st.session_state["started"] = True
+    """Show results, from the first step of the journey, at the top of the page."""
+    state = st.session_state
+    state["started"] = True
+    state["view"] = TABS[0]
+    state["visited"] = {TABS[0]}
+    state["changed_since_start"] = False
+    state["scroll"] = "top"
+    state.pop("last_inputs", None)  # The new settings are where the test starts, not a change to it.
 
 
 def use_demo_data() -> None:
@@ -964,6 +1030,158 @@ def render_data_problem(inputs: Inputs, error: DataError) -> None:
 def show_ideas() -> None:
     st.session_state["started"] = False
     st.query_params.clear()
+
+
+# Guidance. Coach marks point at what to look at next, every tab ends with the next step, and the page glides
+# to where the visitor's attention should be.
+
+
+def _arrow(path: str, tip: tuple[float, float], toward: tuple[float, float], size: tuple[int, int]) -> str:
+    """A hand-drawn arrow that draws itself, with its head at ``tip``, pointing away from ``toward``."""
+    width, height = size
+    dx, dy = tip[0] - toward[0], tip[1] - toward[1]
+    length = math.hypot(dx, dy)
+    back_x, back_y = -dx / length, -dy / length
+
+    def barb(angle: float) -> str:
+        cos, sin = math.cos(angle), math.sin(angle)
+        x = tip[0] + 10 * (back_x * cos - back_y * sin)
+        y = tip[1] + 10 * (back_x * sin + back_y * cos)
+        return f"{x:.1f},{y:.1f}"
+
+    box = f'viewBox="0 0 {width} {height}" width="{width}" height="{height}"'
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" {box}>
+<style>{svg_palette("accent")}
+path{{fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}}
+.line{{stroke-dasharray:1;stroke-dashoffset:1;animation:draw .8s cubic-bezier(.5,.05,.25,1) .7s forwards}}
+.head{{opacity:0;animation:show .2s ease 1.45s forwards}}
+@keyframes draw{{to{{stroke-dashoffset:0}}}} @keyframes show{{to{{opacity:1}}}}
+@media (prefers-reduced-motion:reduce){{.line,.head{{animation:none;stroke-dashoffset:0;opacity:1}}}}
+</style>
+<path class="line" pathLength="1" d="{path}"/>
+<path class="head" d="M{barb(0.5)} L{tip[0]},{tip[1]} L{barb(-0.5)}"/></svg>"""
+    encoded = base64.b64encode(svg.encode()).decode()
+    return (
+        f'<img class="ts-coach-arrow" src="data:image/svg+xml;base64,{encoded}" width="{width}" '
+        f'height="{height}" alt="">'
+    )
+
+
+ARROW_LEFT: Final[tuple[str, tuple[float, float], tuple[float, float], tuple[int, int]]] = (
+    "M84,28 C62,40 32,40 8,22",
+    (8, 22),
+    (32, 40),
+    (90, 50),
+)
+ARROW_DOWN_LEFT: Final[tuple[str, tuple[float, float], tuple[float, float], tuple[int, int]]] = (
+    "M76,10 C46,4 20,16 12,50",
+    (12, 50),
+    (20, 16),
+    (82, 56),
+)
+ARROW_DOWN: Final[tuple[str, tuple[float, float], tuple[float, float], tuple[int, int]]] = (
+    "M8,4 C30,10 40,26 24,48",
+    (24, 48),
+    (40, 26),
+    (52, 54),
+)
+
+
+def coach(
+    text: str, arrow: tuple[str, tuple[float, float], tuple[float, float], tuple[int, int]], css: str
+) -> str:
+    """A handwritten note with an arrow, for pointing at something on the page."""
+    return (
+        f'<div class="ts-coach {css}" aria-hidden="true">{_arrow(*arrow)}'
+        f'<span class="ts-coach-text">{text}</span></div>'
+    )
+
+
+def tips_on() -> bool:
+    return bool(st.session_state.get("tips", True))
+
+
+def hide_tips() -> None:
+    st.session_state["tips"] = False
+
+
+def go_to(view: str) -> None:
+    st.session_state["view"] = view
+    st.session_state["scroll"] = "tabs"
+
+
+def render_next(current: str) -> None:
+    """End a tab by saying what to do next, with one button that goes there."""
+    if current not in NEXT_STEPS:
+        return
+    target, title, why, label = NEXT_STEPS[current]
+    number = TABS.index(target) + 1
+    with st.container(key=f"next_{current.lower().replace(' ', '_')}"):
+        st.html(
+            f"""<div class="ts ts-next">
+<div class="ts-next-kicker">Next · step {number} of {len(TABS) - 1}</div>
+<div class="ts-next-title">{html.escape(title)}</div><p>{html.escape(why)}</p></div>"""
+        )
+        st.button(
+            f"{label}  →",
+            key=f"go_{current.lower().replace(' ', '_')}",
+            on_click=go_to,
+            args=(target,),
+            type="primary",
+        )
+
+
+def render_finish() -> None:
+    """After the last step: what else there is to try."""
+    with st.container(key="next_finish"):
+        st.html(
+            """<div class="ts ts-next"><div class="ts-next-kicker">You've seen it all</div>
+<div class="ts-next-title">Try another idea</div><p>Change the market or the rule in the sidebar, and every
+step updates. Or start again from a ready-made question.</p></div>"""
+        )
+        st.button("All questions  →", key="go_questions", on_click=show_ideas, type="primary")
+
+
+def journey_styles(visited: set[str]) -> None:
+    """Tick off the tabs the visitor has already opened."""
+    ticks = "".join(
+        f'.st-key-view [data-testid="stTab"]:nth-child({TABS.index(view) + 1}):not([aria-selected="true"])'
+        '::before{content:"✓";background:var(--ts-surface-2)}'
+        for view in visited
+        if view in TABS[:-1]
+    )
+    if ticks:
+        st.html(f"<style>{ticks}</style>")
+
+
+def glide() -> None:
+    """Scroll once to where attention should go after a step: the top, or the tabs."""
+    target = st.session_state.pop("scroll", None)
+    if target is None:
+        return
+    # The top means the page itself, since the header sits below the page's own padding.
+    step = (
+        "const main = document.querySelector('[data-testid=\"stMain\"]'); if (!main) return false;"
+        ' main.scrollTo({top: 0, behavior: "smooth"}); return true;'
+        if target == "top"
+        else 'const el = document.querySelector(".st-key-view"); if (!el) return false;'
+        ' el.scrollIntoView({behavior: "smooth", block: "start"}); return true;'
+    )
+    count = st.session_state["glides"] = st.session_state.get("glides", 0) + 1
+    with st.container(key="scripts"):
+        st.html(
+            f"""<script>
+/* glide {count} */
+(function () {{
+  let tries = 0;
+  function go() {{
+    if (!(function () {{ {step} }})() && tries++ < 40) setTimeout(go, 50);
+  }}
+  requestAnimationFrame(go);
+}})();
+</script>""",
+            unsafe_allow_javascript=True,
+        )
 
 
 HERO_START_YEAR: Final[int] = 2006
@@ -1085,7 +1303,11 @@ def render_landing() -> None:
       the price goes above its average". TradStrat tests a rule on years of real prices and compares it with
       simply buying and holding. Then it tells you, in plain words, whether the rule really worked or just
       got lucky.</p>
-    <div class="ts-hero-meta ts-rise" style="--delay:.22s">Seven classic strategies · Any Yahoo Finance
+    <div class="ts-hero-actions ts-rise" style="--delay:.2s">
+      <a class="ts-cta" href="#questions">Try a ready-made question ↓</a>
+      <a class="ts-cta-quiet" href="#compose">or test your own idea</a>
+    </div>
+    <div class="ts-hero-meta ts-rise" style="--delay:.26s">Seven classic strategies · Any Yahoo Finance
       ticker · Or write your own rule · Free and open source</div>
   </div>
   <figure class="ts-hero-figure ts-rise" style="--delay:.1s">{hero_chart()}
@@ -1099,9 +1321,9 @@ def render_landing() -> None:
     ):
         show_tour()
     st.html(
-        '<div class="ts ts-landing-head ts-rise" style="--delay:.25s"><h3 class="ts-display">'
-        'Start with a question</h3><div class="ts-muted">Six classic ideas, each tested on real prices '
-        "in a few seconds.</div></div>"
+        '<div class="ts ts-landing-head ts-rise ts-anchor" id="questions" style="--delay:.25s">'
+        '<h3 class="ts-display">Start with a question</h3><div class="ts-muted">Six classic ideas. Pick one '
+        "and it runs on real prices in a few seconds.</div></div>"
     )
     # Questions rise one after another. Their containers are Streamlit's, so each gets its place by key.
     order = "".join(f".st-key-question_{q.key}{{--order:{n}}}" for n, q in enumerate(QUESTIONS))
@@ -1129,11 +1351,9 @@ def render_landing() -> None:
                 type="tertiary",
             )
 
+    render_compose()
+
     steps = [
-        (
-            "Pick a market and a rule",
-            "Any ticker on Yahoo Finance, one of seven classic strategies, or a rule you write yourself.",
-        ),
         (
             "Replay the past",
             "Every trade fills at the next day's price, after commission and slippage, as it would have "
@@ -1163,18 +1383,99 @@ def render_landing() -> None:
     costs, hindsight and plain luck. TradStrat checks for all three, and stress-tests every result, for free,
     before you risk anything.</p>
   </div>
-  <div class="ts-steps">{items}</div>
+  <div class="ts-steps"><div class="ts-eyebrow">What happens when you run a test</div>{items}</div>
   <div class="ts-muted ts-small">Words with a dotted underline, like {rich("Sharpe ratio")}, explain
   themselves when you hover over or tap them.</div>
 </div>"""
     )
-    st.button(
-        "Or set up your own test in the sidebar",
-        key="start_own",
-        on_click=start,
-        type="tertiary",
-        icon=":material/tune:",
-    )
+
+
+def _picked_market() -> None:
+    """Choosing a named market clears a typed symbol, so the two never disagree."""
+    st.session_state["compose_symbol"] = ""
+
+
+def compose() -> None:
+    """Copy the three choices on the landing page into the sidebar, and run the test."""
+    state = st.session_state
+    typed = state.get("compose_symbol", "").strip().upper()[:20]
+    ticker = typed or state.get("compose_market") or "SPY"
+    strategy = state.get("compose_strategy") or "trend_filter"
+    state["source"] = "Yahoo"
+    state["ticker"] = ticker
+    state["ticker_pick"] = ticker if ticker in QUICK_TICKERS else None
+    state["history"] = state.get("compose_history") or "10Y"
+    state["custom_dates"] = False
+    state["strategy"] = strategy
+    if strategy != CUSTOM:
+        for spec in STRATEGIES[strategy].params:
+            state[f"{strategy}.{spec.name}"] = spec.default
+    start()
+
+
+def render_compose() -> None:
+    """Three choices and one button: the shortest way to test an idea of your own."""
+    state = st.session_state
+    state.setdefault("compose_market", "SPY")
+    state.setdefault("compose_strategy", "trend_filter")
+    state.setdefault("compose_history", "10Y")
+    with st.container(key="compose"):
+        st.html(
+            '<div class="ts ts-anchor" id="compose"><h3 class="ts-display">Or test your own idea</h3>'
+            '<div class="ts-muted">Three choices, one click. You can change any of them afterwards.</div>'
+            "</div>"
+        )
+        st.html('<div class="ts ts-compose-step"><span>1</span>Pick a market</div>')
+        named, typed = st.columns([2.4, 1], gap="medium", vertical_alignment="center")
+        with named:
+            st.pills(
+                "Market",
+                list(MARKETS),
+                format_func=MARKETS.__getitem__,
+                key="compose_market",
+                on_change=_picked_market,
+                label_visibility="collapsed",
+            )
+        with typed:
+            st.text_input(
+                "Or any Yahoo Finance symbol",
+                key="compose_symbol",
+                placeholder="Other symbol, e.g. TSLA",
+                max_chars=20,
+                label_visibility="collapsed",
+            )
+        rule, history = st.columns([1.4, 1], gap="large")
+        with rule:
+            st.html('<div class="ts ts-compose-step"><span>2</span>Pick a rule</div>')
+            choice = st.selectbox(
+                "Rule",
+                STRATEGY_CHOICES,
+                format_func=lambda key: "Write your own rule" if key == CUSTOM else STRATEGIES[key].label,
+                key="compose_strategy",
+                label_visibility="collapsed",
+            )
+            summary = (
+                "Type a rule like rsi(2) < 10 and close > sma(200) in the sidebar, after you start."
+                if choice == CUSTOM
+                else guide_for(STRATEGIES[choice]).summary
+            )
+            st.html(f'<div class="ts ts-compose-hint">{html.escape(summary)}</div>')
+        with history:
+            st.html('<div class="ts ts-compose-step"><span>3</span>How far back</div>')
+            st.segmented_control(
+                "History",
+                COMPOSE_HISTORIES,
+                key="compose_history",
+                required=True,
+                width="stretch",
+                label_visibility="collapsed",
+            )
+            st.html('<div class="ts ts-compose-hint">Longer histories include more crashes.</div>')
+        st.button("Run the test  →", key="compose_run", on_click=compose, type="primary")
+        st.html(
+            '<div class="ts ts-compose-after">You get a straight answer against simply holding, a luck test '
+            "and six stress tests, in a few seconds.</div>"
+        )
 
 
 def signal_html(prices: pd.DataFrame, inputs: Inputs) -> str:
@@ -1375,7 +1676,7 @@ ANSWER_CHIPS: Final[dict[str, tuple[str, str]]] = {
 }
 
 
-def render_answer(result: BacktestResult, probability: float, asset: str) -> None:
+def render_answer(result: BacktestResult, probability: float, asset: str, *, point: bool = False) -> None:
     """The verdict as a head-to-head between the rule and holding, in calm colors, with what it means."""
     verdict = assess(result.metrics, result.benchmark_metrics, probability, asset)
     contests = rounds(result.metrics, result.benchmark_metrics)
@@ -1389,9 +1690,10 @@ def render_answer(result: BacktestResult, probability: float, asset: str) -> Non
         f"trade{'s' if metrics.number_of_trades != 1 else ''}."
     )
     cards = "".join(round_html(contest, seen) for contest in contests) + luck_html(probability)
+    note = coach("Start here: the whole answer in one line", ARROW_LEFT, "ts-coach-verdict") if point else ""
     st.html(
         f"""<div class="ts ts-answer ts-rise">
-  <div class="ts-answer-head">
+  <div class="ts-answer-head">{note}
     <div class="ts-eyebrow">Did the rule beat just holding {html.escape(asset)}?</div>
     <div class="ts-answer-title">
       <span class="ts-pill ts-pill-{side}">{label}</span>{html.escape(verdict.headline)}
@@ -1404,10 +1706,16 @@ def render_answer(result: BacktestResult, probability: float, asset: str) -> Non
 
 
 def render_results(
-    result: BacktestResult, estimate: BootstrapResult | None, stress: Stress, theme: ChartTheme, asset: str
+    result: BacktestResult,
+    estimate: BootstrapResult | None,
+    stress: Stress,
+    theme: ChartTheme,
+    asset: str,
+    *,
+    point: bool = False,
 ) -> None:
     probability = estimate.probability_beats_benchmark if estimate else float("nan")
-    render_answer(result, probability, asset)
+    render_answer(result, probability, asset, point=point)
 
     results = result.results
     start = result.config.initial_capital
@@ -1948,9 +2256,11 @@ def main() -> None:
     st.set_page_config(page_title="TradStrat", page_icon=":material/monitoring:", layout="wide")
     theme = theme_for(st.context.theme.type == "dark")
     inject_styles()
+    side_tip = st.sidebar.container()  # Above the settings, filled once it is known whether to show a tip.
     restore_from_link()
     inputs = read_sidebar()
     started = has_started(inputs)
+    state = st.session_state
 
     header, ideas, actions = st.columns([5, 1.1, 1.4], vertical_alignment="center")
     with header, st.container(key="home"):
@@ -1960,7 +2270,12 @@ def main() -> None:
     if not started:
         render_landing()
         render_footer()
+        glide()
         return
+    if tips_on() and not state.get("changed_since_start"):
+        side_tip.html(
+            coach("Change the market or rule here. Everything updates.", ARROW_DOWN, "ts-coach-side")
+        )
     write_link(inputs, st.session_state.get("_history_for_link"))
     ideas.button(
         "All questions", on_click=show_ideas, type="tertiary", icon=":material/arrow_back:", width="stretch"
@@ -2012,19 +2327,40 @@ def main() -> None:
         )
     render_context(prices, inputs, warning)
 
-    results, stress_tab, trades, tune, compare, guide = st.tabs(TABS)
-    with results:
-        render_results(result, estimate, stress, theme, inputs.label)
-    with stress_tab:
-        render_stress(stress, result, theme)
-    with trades:
-        render_trades(result, prices, inputs, theme)
-    with tune:
-        render_tune(prices, inputs, theme)
-    with compare:
-        render_compare(prices, inputs, theme)
-    with guide:
-        render_guide()
+    # The tabs are the journey. Only the open one is built, and each ends by pointing to the next.
+    visited: set[str] = state.setdefault("visited", {TABS[0]})
+    visited.add(state.get("view") or TABS[0])
+    journey_styles(visited)
+    if tips_on() and "Stress test" not in visited:
+        with st.container(key="coach_tabs", horizontal=True):
+            st.html(coach("Then see if it survives a stress test", ARROW_DOWN_LEFT, "ts-coach-tabs"))
+            st.button("Got it, hide tips", key="hide_tips", on_click=hide_tips, type="tertiary")
+    results, stress_tab, trades, tune, compare, guide = st.tabs(TABS, key="view", on_change="rerun")
+    if results.open:
+        with results:
+            point = tips_on() and visited == {TABS[0]}
+            render_results(result, estimate, stress, theme, inputs.label, point=point)
+            render_next("Results")
+    if stress_tab.open:
+        with stress_tab:
+            render_stress(stress, result, theme)
+            render_next("Stress test")
+    if trades.open:
+        with trades:
+            render_trades(result, prices, inputs, theme)
+            render_next("Trades")
+    if tune.open:
+        with tune:
+            render_tune(prices, inputs, theme)
+            render_next("Tune")
+    if compare.open:
+        with compare:
+            render_compare(prices, inputs, theme)
+            render_finish()
+    if guide.open:
+        with guide:
+            render_guide()
+    glide()
     render_footer()
 
 

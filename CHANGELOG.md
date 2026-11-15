@@ -2,6 +2,26 @@
 
 All notable changes to TradStrat. The project follows [semantic versioning](https://semver.org).
 
+## Unreleased
+
+### Added
+
+- **A guided first test.** Below the ready-made questions, three numbered choices (a market, a rule and how
+  much history) and one button run a test of your own without opening the sidebar. Indices show their names,
+  such as Nifty 50 for `^NSEI`.
+- **Hand-drawn hints** point at where to look first: the one-line answer, the stress test tab and the sidebar.
+  They leave once you have used them, and one click hides them for good.
+- **A next step at the end of every tab.** Results leads to the stress test, then the trades, tuning and the
+  comparison, so a visitor never reaches the bottom of a page and wonders what to do. Tabs are numbered in that
+  order and tick off as you visit them, and the page glides to the next one.
+- **A notice when settings change.** Changing the market or rule in the sidebar updates every tab and says so.
+
+### Changed
+
+- **Fractional shares.** Backtests now invest the whole budget instead of rounding down to whole shares, which
+  left much of the capital idle in assets quoted in the thousands, such as the Nifty 50, and understated
+  their returns.
+
 ## 2.1.0
 
 ### Added
