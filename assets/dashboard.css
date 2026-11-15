@@ -887,87 +887,164 @@
   color: var(--ts-muted);
 }
 
-/* Coach marks: handwritten notes with drawn arrows that point at what to look at next. */
+/* The guided tour: one card at a time, a spotlight on what it explains, and a hand-drawn arrow between. */
 
-.ts-coach {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  font-family: "Caveat", "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
-  font-size: 22px;
-  font-weight: 600;
-  line-height: 1.1;
-  color: var(--ts-accent);
-  pointer-events: none;
-  animation: ts-coach-in .7s var(--ts-ease) .5s both;
+.st-key-tour {
+  position: fixed !important;
+  right: 28px;
+  bottom: 28px;
+  width: 368px !important;
+  z-index: 999999;
+  padding: 18px 18px 10px;
+  gap: 4px !important;
+  overflow: visible !important;
+  /* Backwards only: a transform left behind would pin the fixed overlay inside to the card. */
+  animation: ts-tour-in .5s var(--ts-ease) backwards;
 }
 
-.ts-coach-arrow {
-  flex: none;
-  animation: ts-nudge 2.4s ease-in-out 1.6s infinite;
-}
-
-.ts-coach-text {
-  max-width: 270px;
-  padding-top: 2px;
-}
-
-.ts-answer-head {
-  position: relative;
-  container-type: inline-size;
-}
-
-.ts-coach-verdict {
+.st-key-tour::before {
+  content: "";
   position: absolute;
-  left: min(560px, 58%);
-  top: 18px;
-  flex-direction: row;
+  inset: 0;
+  z-index: -1;
+  background: var(--ts-surface);
+  border: 1px solid var(--ts-border);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px -18px rgba(0, 0, 0, .45), 0 2px 8px rgba(0, 0, 0, .08);
+}
+
+.st-key-tour_script {
+  display: none;
+}
+
+#ts-tour-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: -2;
+  pointer-events: none;
+  overflow: visible;
+  transition: opacity .3s ease;
+}
+
+#ts-tour-overlay .dim {
+  fill: light-dark(rgba(18, 22, 30, .34), rgba(0, 0, 0, .55));
+}
+
+#ts-tour-overlay .ring {
+  fill: none;
+  stroke: var(--ts-accent);
+  stroke-width: 2;
+  animation: ts-ring 2s ease-in-out infinite;
+}
+
+#ts-tour-overlay .line, #ts-tour-overlay .head {
+  fill: none;
+  stroke: var(--ts-accent);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#ts-tour-overlay .line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+
+#ts-tour-overlay .line.go {
+  animation: ts-draw .75s cubic-bezier(.5, .05, .25, 1) .2s forwards;
+}
+
+#ts-tour-overlay .head {
+  opacity: 0;
+}
+
+#ts-tour-overlay .head.go {
+  animation: ts-show .2s ease .9s forwards;
+}
+
+.ts-tour-top {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
 }
 
-@container (max-width: 860px) {
-  .ts-coach-verdict {
-    display: none;
-  }
+.ts-tour-count {
+  font-family: "Caveat", "Segoe Print", "Bradley Hand", cursive;
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ts-accent);
 }
 
-.st-key-coach_tabs {
-  height: 58px;
-  margin-bottom: -22px;
-  padding-left: 96px;
-  gap: 18px;
-  align-items: flex-start;
+.ts-tour-dots {
+  display: flex;
+  gap: 5px;
 }
 
-.st-key-coach_tabs [data-testid="stElementContainer"]:has(.ts-coach) {
-  width: auto !important;
+.ts-tour-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ts-border);
+  transition: background .3s ease, transform .3s ease;
 }
 
-.st-key-hide_tips button {
-  pointer-events: auto;
-  font-size: 13px;
+.ts-tour-dots i.on {
+  background: var(--ts-accent);
+}
+
+.ts-tour-dots i.on:last-of-type, .ts-tour-dots i.on:has(+ i:not(.on)) {
+  transform: scale(1.3);
+}
+
+.ts-tour-title {
+  font-family: var(--ts-serif);
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ts-ink);
+}
+
+.ts-tour p {
+  margin: 6px 0 4px;
+  font-size: 14.5px;
+  line-height: 1.5;
   color: var(--ts-muted);
-  padding: 2px 0;
-  min-height: 0;
-  margin-top: 8px;
 }
 
-.st-key-hide_tips button p {
-  font-size: 13px;
+.st-key-tour_buttons {
+  justify-content: flex-end;
+  gap: 4px !important;
 }
 
-.ts-coach-side {
-  margin: 0 0 10px 6px;
+.st-key-tour_skip {
+  margin-right: auto;
 }
 
-@keyframes ts-coach-in {
-  from { opacity: 0; transform: translateY(6px) rotate(-1deg); }
-  to { opacity: 1; transform: none; }
+.st-key-tour_skip button p, .st-key-tour_back button p {
+  font-size: 13.5px;
+  color: var(--ts-muted);
 }
 
-@keyframes ts-nudge {
-  0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(-3px, 3px); }
+@keyframes ts-tour-in {
+  from { opacity: 0; translate: 0 14px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@keyframes ts-ring {
+  0%, 100% { stroke-opacity: 1; stroke-width: 2; }
+  50% { stroke-opacity: .45; stroke-width: 4; }
+}
+
+@keyframes ts-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes ts-show {
+  to { opacity: 1; }
 }
 
 /* Numbered tabs: each step of the journey shows its number, and a tick once it has been seen. */
@@ -1204,17 +1281,20 @@
     padding: 20px 16px 18px;
   }
 
-  .st-key-coach_tabs {
-    padding-left: 104px;
+  .st-key-tour {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: auto !important;
+    padding: 14px 14px 6px;
   }
 
-  .st-key-coach_tabs .ts-coach-text {
-    max-width: 150px;
+  .ts-tour-title {
     font-size: 19px;
   }
 
-  .st-key-hide_tips {
-    display: none;
+  .ts-tour p {
+    font-size: 14px;
   }
 
   [class*="st-key-next_"] {
@@ -1252,8 +1332,16 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ts *, .ts, [class*="st-key-question_"], [class*="st-key-ask_"] button, .stTabs [data-baseweb="tab-panel"],
-  [class*="st-key-next_"], .ts-coach, .ts-coach-arrow {
+  [class*="st-key-next_"], .st-key-tour, #ts-tour-overlay * {
     animation: none !important;
     transition: none !important;
+  }
+
+  #ts-tour-overlay .line {
+    stroke-dashoffset: 0;
+  }
+
+  #ts-tour-overlay .head {
+    opacity: 1;
   }
 }

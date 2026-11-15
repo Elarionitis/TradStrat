@@ -9,8 +9,10 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 - **A guided first test.** Below the ready-made questions, three numbered choices (a market, a rule and how
   much history) and one button run a test of your own without opening the sidebar. Indices show their names,
   such as Nifty 50 for `^NSEI`.
-- **Hand-drawn hints** point at where to look first: the one-line answer, the stress test tab and the sidebar.
-  They leave once you have used them, and one click hides them for good.
+- **A guided tour of the first result.** Six short steps, one at a time: the answer, the scorecard, the
+  money, the stress test and the sidebar. Each step dims the rest of the page, spotlights what it explains and
+  draws a curved arrow to it, scrolling it into view and opening the right tab. Back, Next and Skip work from
+  the keyboard too, and the sidebar can start the tour again.
 - **A next step at the end of every tab.** Results leads to the stress test, then the trades, tuning and the
   comparison, so a visitor never reaches the bottom of a page and wonders what to do. Tabs are numbered in that
   order and tick off as you visit them, and the page glides to the next one.

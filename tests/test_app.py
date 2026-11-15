@@ -279,20 +279,75 @@ def test_the_composer_runs_the_market_rule_and_history_you_picked(monkeypatch: p
 
 
 def test_each_tab_ends_with_the_next_step(app: AppTest) -> None:
-    assert 'class=\\"ts-coach ' in rendered(app)
-
     next(item for item in app.button if item.key == "go_results").click().run()
 
     assert app.session_state["view"] == "Stress test"
     assert "Results" in app.session_state["visited"]
-    assert "Then see if it survives" not in rendered(app)
 
 
-def test_tips_can_be_hidden(app: AppTest) -> None:
-    next(item for item in app.button if item.key == "hide_tips").click().run()
+def tour_card(test: AppTest) -> str:
+    blocks = (str(element.proto) for element in test.get("html"))
+    return " ".join(block for block in blocks if "ts-tour-top" in block and "<style>" not in block)
 
-    assert 'class=\\"ts-coach ' not in rendered(app)
-    assert not [item for item in app.button if item.key == "hide_tips"]
+
+def press(test: AppTest, key: str) -> None:
+    next(item for item in test.button if item.key == key).click().run()
+
+
+def test_the_first_test_opens_a_tour_one_step_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    sample = load_sample()
+    monkeypatch.setattr(data_module, "PROVIDERS", (("stub", lambda *_: sample),))
+    test = landing()
+    press(test, "ask_bitcoin_trend")
+
+    assert "Step 1 of 6" in tour_card(test)
+    assert "Start with the answer" in tour_card(test)
+    assert not [item for item in test.button if item.key == "tour_back"]
+
+    for _ in range(4):
+        press(test, "tour_next")
+    assert test.session_state["view"] == "Stress test"
+    assert "Step 5 of 6" in tour_card(test)
+
+    press(test, "tour_back")
+    assert test.session_state["view"] == "Results"
+    assert "Step 4 of 6" in tour_card(test)
+
+    press(test, "tour_next")
+    press(test, "tour_next")
+    press(test, "tour_next")
+    assert not tour_card(test)
+    assert test.session_state["tour"] is None
+    assert not test.exception
+
+
+def test_the_tour_can_be_skipped_and_taken_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    sample = load_sample()
+    monkeypatch.setattr(data_module, "PROVIDERS", (("stub", lambda *_: sample),))
+    test = landing()
+    press(test, "ask_bitcoin_trend")
+
+    press(test, "tour_skip")
+    assert not tour_card(test)
+
+    test.session_state["view"] = "Trades"
+    test.run()
+    press(test, "tour_replay")
+    assert "Step 1 of 6" in tour_card(test)
+    assert test.session_state["view"] == "Results"
+
+
+def test_the_tour_opens_only_once_per_visit(monkeypatch: pytest.MonkeyPatch) -> None:
+    sample = load_sample()
+    monkeypatch.setattr(data_module, "PROVIDERS", (("stub", lambda *_: sample),))
+    test = landing()
+    press(test, "ask_bitcoin_trend")
+    press(test, "tour_skip")
+
+    button(test, "All questions").click().run()
+    press(test, "ask_bitcoin_trend")
+
+    assert not tour_card(test)
 
 
 def test_a_sidebar_change_after_the_start_is_announced(app: AppTest) -> None:

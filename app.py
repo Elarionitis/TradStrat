@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import html
 import io
+import json
 import math
 import re
 import sys
@@ -259,6 +260,195 @@ PALETTE: Final[dict[str, dict[str, str]]] = {
 ASSETS: Final[Path] = Path(__file__).parent / "assets"
 TOUR: Final[Path] = ASSETS / "tradstrat-tour.mp4"
 STYLESHEET: Final[str] = (ASSETS / "dashboard.css").read_text()
+
+
+@dataclass(frozen=True)
+class TourStep:
+    """One stop of the guided tour: where it is, what to point at, and what to say about it."""
+
+    view: str | None  # The tab it lives on, or None for the sidebar, which every tab shares.
+    targets: tuple[str, ...]  # CSS selectors; the first one on screen is pointed at.
+    title: str
+    text: str
+    button: str = "Next"
+
+
+WALKTHROUGH: Final[tuple[TourStep, ...]] = (
+    TourStep(
+        "Results",
+        (".ts-answer-head",),
+        "Start with the answer",
+        "This line says whether the rule beat simply holding, and how far to trust that.",
+    ),
+    TourStep(
+        "Results",
+        (".ts-rounds",),
+        "Then the scorecard",
+        "The rule against holding on growth, risk and the worst fall. Each card names the winner.",
+    ),
+    TourStep(
+        "Results",
+        (".ts-money",),
+        "What the money did",
+        "What the starting amount became each way. The chart below draws the whole path.",
+    ),
+    TourStep(
+        "Results",
+        ('.st-key-view [data-testid="stTab"]:nth-child(2)',),
+        "Now, can you trust it?",
+        "One backtest can be luck. The stress test reruns the rule six harder ways.",
+        "Open the stress test",
+    ),
+    TourStep(
+        "Stress test",
+        (".ts-stress-head", ".ts-stress"),
+        "Does it survive?",
+        "Each question passes or fails, with the reason right below it. A rule worth trusting passes most.",
+    ),
+    TourStep(
+        None,
+        (
+            '[data-testid="stSidebarUserContent"]',
+            '[data-testid="stExpandSidebarButton"]',
+            '[data-testid="stSidebarCollapsedControl"]',
+        ),
+        "Now test your own idea",
+        "Every setting lives in the sidebar, behind » when it is closed. Change the market, the rule or "
+        "the history, and every tab updates.",
+        "Finish",
+    ),
+)
+
+
+# Draws the tour's spotlight and arrow, and keeps them on their target as the page scrolls or reflows. It
+# runs one animation-frame loop for as long as the tour card is on the page; each step only updates the
+# configuration it reads. The overlay lives inside the card, so it always sits just beneath it.
+TOUR_SCRIPT: Final[str] = """
+(function () {
+  const config = __CONFIG__;
+  window.__tsTour = config;
+  if (window.__tsTourRunning) return;
+  window.__tsTourRunning = true;
+  const doc = document, NS = "http://www.w3.org/2000/svg";
+  let svg = null, dim, ring, line, head, pointed = null, missing = 0;
+
+  function make(tag, cls) {
+    const el = doc.createElementNS(NS, tag);
+    if (cls) el.setAttribute("class", cls);
+    return el;
+  }
+  function build(card) {
+    svg = make("svg");
+    svg.id = "ts-tour-overlay";
+    svg.setAttribute("aria-hidden", "true");
+    dim = make("path", "dim");
+    dim.setAttribute("fill-rule", "evenodd");
+    ring = make("rect", "ring");
+    line = make("path", "line");
+    line.setAttribute("pathLength", "1");
+    head = make("path", "head");
+    svg.append(dim, ring, line, head);
+    card.appendChild(svg);
+  }
+  function visible(selectors) {
+    for (const selector of selectors) {
+      for (const el of doc.querySelectorAll(selector)) {
+        const box = el.getBoundingClientRect();
+        if (box.width > 4 && box.height > 4) return el;
+      }
+    }
+    return null;
+  }
+  function edge(box, from) {
+    // Where the line from ``from`` to the middle of ``box`` crosses its border.
+    const cx = box.x + box.w / 2, cy = box.y + box.h / 2, dx = from[0] - cx, dy = from[1] - cy;
+    const scale = Math.min(Math.abs(dx) > 0 ? box.w / 2 / Math.abs(dx) : Infinity,
+                           Math.abs(dy) > 0 ? box.h / 2 / Math.abs(dy) : Infinity);
+    return scale >= 1 ? null : [cx + dx * scale, cy + dy * scale];
+  }
+  function bring(el, card) {
+    const main = doc.querySelector('[data-testid="stMain"]');
+    if (!main || !main.contains(el)) return;
+    const box = el.getBoundingClientRect(), top = main.getBoundingClientRect().top;
+    const covered = card.left < box.right && card.top < innerHeight - 8 ? card.top : innerHeight;
+    if (box.top >= top + 70 && box.bottom <= covered - 24) return;
+    main.scrollTo({top: main.scrollTop + box.top - top - 96, behavior: "smooth"});
+  }
+  function redraw() {
+    line.classList.remove("go");
+    head.classList.remove("go");
+    void svg.getBoundingClientRect();
+    line.classList.add("go");
+    head.classList.add("go");
+  }
+  function tick() {
+    const card = doc.querySelector(".st-key-tour"), now = window.__tsTour;
+    if (!card) {
+      if (++missing > 120) { window.__tsTourRunning = false; return; }
+      requestAnimationFrame(tick);
+      return;
+    }
+    missing = 0;
+    if (!svg || !card.contains(svg)) { build(card); pointed = null; }
+    const target = visible(now.targets);
+    if (!target) { svg.style.opacity = "0"; requestAnimationFrame(tick); return; }
+    const c = card.getBoundingClientRect();
+    if (pointed !== now.key) { pointed = now.key; bring(target, c); redraw(); }
+    svg.style.opacity = "1";
+
+    const t = target.getBoundingClientRect(), pad = 8, r = 12;
+    const x = t.left - pad, y = t.top - pad, w = t.width + 2 * pad, h = t.height + 2 * pad;
+    const W = innerWidth, H = innerHeight;
+    dim.setAttribute("d", `M0,0H${W}V${H}H0Z M${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}` +
+      `V${y + h - r}Q${x + w},${y + h} ${x + w - r},${y + h}H${x + r}Q${x},${y + h} ${x},${y + h - r}` +
+      `V${y + r}Q${x},${y} ${x + r},${y}Z`);
+    for (const [name, value] of [["x", x], ["y", y], ["width", w], ["height", h], ["rx", r]]) {
+      ring.setAttribute(name, value);
+    }
+
+    // A curved arrow from the card to the spotlight, its head on the spotlight's edge.
+    const middle = [c.left + c.width / 2, c.top + c.height / 2];
+    const end = edge({x: x - 6, y: y - 6, w: w + 12, h: h + 12}, middle);
+    const start = end && edge({x: c.left - 8, y: c.top - 8, w: c.width + 16, h: c.height + 16}, [
+      x + w / 2, y + h / 2]);
+    if (!end || !start || Math.hypot(end[0] - start[0], end[1] - start[1]) < 36) {
+      line.setAttribute("d", "");
+      head.setAttribute("d", "");
+    } else {
+      const mx = (start[0] + end[0]) / 2, my = (start[1] + end[1]) / 2;
+      const dx = end[0] - start[0], dy = end[1] - start[1], length = Math.hypot(dx, dy);
+      let nx = -dy / length, ny = dx / length;
+      if (ny > 0) { nx = -nx; ny = -ny; }
+      const bend = Math.min(90, length * 0.28);
+      const q = [mx + nx * bend, my + ny * bend];
+      line.setAttribute("d", `M${start[0]},${start[1]} Q${q[0]},${q[1]} ${end[0]},${end[1]}`);
+      const ax = end[0] - q[0], ay = end[1] - q[1], a = Math.hypot(ax, ay), ux = ax / a, uy = ay / a;
+      const barb = (turn) => {
+        const cos = Math.cos(turn), sin = Math.sin(turn);
+        return `${end[0] - 13 * (ux * cos - uy * sin)},${end[1] - 13 * (ux * sin + uy * cos)}`;
+      };
+      head.setAttribute("d", `M${barb(0.45)} L${end[0]},${end[1]} L${barb(-0.45)}`);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  if (!window.__tsTourKeys) {
+    window.__tsTourKeys = true;
+    doc.addEventListener("keydown", (event) => {
+      if (!doc.querySelector(".st-key-tour")) return;
+      const at = event.target;
+      const typing = 'input, textarea, select, [contenteditable], [role="slider"], [role="tab"]';
+      if (at && at.closest && at.closest(typing)) return;
+      const key = {Escape: "tour_skip", ArrowRight: "tour_next", ArrowLeft: "tour_back"}[event.key];
+      const button = key && doc.querySelector(`.st-key-${key} button`);
+      if (button) { event.preventDefault(); button.click(); }
+    });
+  }
+  requestAnimationFrame(tick);
+})();
+"""
+
+
 HANDWRITING: Final[str] = "https://fonts.googleapis.com/css2?family=Caveat:wght@600&display=swap"
 
 
@@ -571,7 +761,6 @@ def has_started(inputs: Inputs) -> bool:
     if previous is not None and previous != fingerprint:
         if state.get("started"):
             # Results update in place, so say so: a quiet change is easy to miss.
-            state["changed_since_start"] = True
             name = "your rule" if inputs.strategy_key == CUSTOM else STRATEGIES[inputs.strategy_key].label
             st.toast(f"Updated: {name} on {inputs.label}", icon=":material/autorenew:")
         else:
@@ -991,8 +1180,11 @@ def start() -> None:
     state["started"] = True
     state["view"] = TABS[0]
     state["visited"] = {TABS[0]}
-    state["changed_since_start"] = False
-    state["scroll"] = "top"
+    if state.get("toured"):
+        state["scroll"] = "top"
+    else:  # The tour brings each part into view itself.
+        state["toured"] = True
+        tour_to(0)
     state.pop("last_inputs", None)  # The new settings are where the test starts, not a change to it.
 
 
@@ -1036,73 +1228,46 @@ def show_ideas() -> None:
 # to where the visitor's attention should be.
 
 
-def _arrow(path: str, tip: tuple[float, float], toward: tuple[float, float], size: tuple[int, int]) -> str:
-    """A hand-drawn arrow that draws itself, with its head at ``tip``, pointing away from ``toward``."""
-    width, height = size
-    dx, dy = tip[0] - toward[0], tip[1] - toward[1]
-    length = math.hypot(dx, dy)
-    back_x, back_y = -dx / length, -dy / length
-
-    def barb(angle: float) -> str:
-        cos, sin = math.cos(angle), math.sin(angle)
-        x = tip[0] + 10 * (back_x * cos - back_y * sin)
-        y = tip[1] + 10 * (back_x * sin + back_y * cos)
-        return f"{x:.1f},{y:.1f}"
-
-    box = f'viewBox="0 0 {width} {height}" width="{width}" height="{height}"'
-    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" {box}>
-<style>{svg_palette("accent")}
-path{{fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}}
-.line{{stroke-dasharray:1;stroke-dashoffset:1;animation:draw .8s cubic-bezier(.5,.05,.25,1) .7s forwards}}
-.head{{opacity:0;animation:show .2s ease 1.45s forwards}}
-@keyframes draw{{to{{stroke-dashoffset:0}}}} @keyframes show{{to{{opacity:1}}}}
-@media (prefers-reduced-motion:reduce){{.line,.head{{animation:none;stroke-dashoffset:0;opacity:1}}}}
-</style>
-<path class="line" pathLength="1" d="{path}"/>
-<path class="head" d="M{barb(0.5)} L{tip[0]},{tip[1]} L{barb(-0.5)}"/></svg>"""
-    encoded = base64.b64encode(svg.encode()).decode()
-    return (
-        f'<img class="ts-coach-arrow" src="data:image/svg+xml;base64,{encoded}" width="{width}" '
-        f'height="{height}" alt="">'
-    )
+def tour_to(step: int | None) -> None:
+    """Move the tour to ``step``, opening the tab it lives on, or end it when there is no such step."""
+    state = st.session_state
+    if step is None or not 0 <= step < len(WALKTHROUGH):
+        state["tour"] = None
+        return
+    state["tour"] = step
+    state["tour_moves"] = state.get("tour_moves", 0) + 1  # Point again, even at the same step.
+    view = WALKTHROUGH[step].view
+    if view is not None:
+        state["view"] = view
 
 
-ARROW_LEFT: Final[tuple[str, tuple[float, float], tuple[float, float], tuple[int, int]]] = (
-    "M84,28 C62,40 32,40 8,22",
-    (8, 22),
-    (32, 40),
-    (90, 50),
-)
-ARROW_DOWN_LEFT: Final[tuple[str, tuple[float, float], tuple[float, float], tuple[int, int]]] = (
-    "M76,10 C46,4 20,16 12,50",
-    (12, 50),
-    (20, 16),
-    (82, 56),
-)
-ARROW_DOWN: Final[tuple[str, tuple[float, float], tuple[float, float], tuple[int, int]]] = (
-    "M8,4 C30,10 40,26 24,48",
-    (24, 48),
-    (40, 26),
-    (52, 54),
-)
-
-
-def coach(
-    text: str, arrow: tuple[str, tuple[float, float], tuple[float, float], tuple[int, int]], css: str
-) -> str:
-    """A handwritten note with an arrow, for pointing at something on the page."""
-    return (
-        f'<div class="ts-coach {css}" aria-hidden="true">{_arrow(*arrow)}'
-        f'<span class="ts-coach-text">{text}</span></div>'
-    )
-
-
-def tips_on() -> bool:
-    return bool(st.session_state.get("tips", True))
-
-
-def hide_tips() -> None:
-    st.session_state["tips"] = False
+def render_tour() -> None:
+    """One stop of the tour at a time: a card that explains, a spotlight on the part it explains, and a
+    hand-drawn arrow from one to the other. The spotlight and arrow are drawn by a small script, since only
+    the browser knows where things are on screen."""
+    step = st.session_state.get("tour")
+    if step is None:
+        return
+    stop = WALKTHROUGH[step]
+    dots = "".join(f'<i class="{"on" if index <= step else ""}"></i>' for index in range(len(WALKTHROUGH)))
+    with st.container(key="tour"):
+        st.html(
+            f"""<div class="ts ts-tour" role="dialog" aria-label="Guided tour">
+<div class="ts-tour-top"><span class="ts-tour-count">Step {step + 1} of {len(WALKTHROUGH)}</span>
+<span class="ts-tour-dots">{dots}</span></div>
+<div class="ts-tour-title">{html.escape(stop.title)}</div><p>{html.escape(stop.text)}</p></div>"""
+        )
+        with st.container(key="tour_buttons", horizontal=True, vertical_alignment="center"):
+            st.button("Skip tour", key="tour_skip", on_click=tour_to, args=(None,), type="tertiary")
+            if step > 0:
+                st.button("Back", key="tour_back", on_click=tour_to, args=(step - 1,), type="tertiary")
+            st.button(
+                f"{stop.button}  →", key="tour_next", on_click=tour_to, args=(step + 1,), type="primary"
+            )
+    shown = st.session_state.get("tour_moves", 0)
+    config = json.dumps({"step": step, "targets": stop.targets, "key": f"{step}:{shown}"})
+    with st.container(key="tour_script"):
+        st.html(f"<script>{TOUR_SCRIPT.replace('__CONFIG__', config)}</script>", unsafe_allow_javascript=True)
 
 
 def go_to(view: str) -> None:
@@ -1676,7 +1841,7 @@ ANSWER_CHIPS: Final[dict[str, tuple[str, str]]] = {
 }
 
 
-def render_answer(result: BacktestResult, probability: float, asset: str, *, point: bool = False) -> None:
+def render_answer(result: BacktestResult, probability: float, asset: str) -> None:
     """The verdict as a head-to-head between the rule and holding, in calm colors, with what it means."""
     verdict = assess(result.metrics, result.benchmark_metrics, probability, asset)
     contests = rounds(result.metrics, result.benchmark_metrics)
@@ -1690,10 +1855,9 @@ def render_answer(result: BacktestResult, probability: float, asset: str, *, poi
         f"trade{'s' if metrics.number_of_trades != 1 else ''}."
     )
     cards = "".join(round_html(contest, seen) for contest in contests) + luck_html(probability)
-    note = coach("Start here: the whole answer in one line", ARROW_LEFT, "ts-coach-verdict") if point else ""
     st.html(
         f"""<div class="ts ts-answer ts-rise">
-  <div class="ts-answer-head">{note}
+  <div class="ts-answer-head">
     <div class="ts-eyebrow">Did the rule beat just holding {html.escape(asset)}?</div>
     <div class="ts-answer-title">
       <span class="ts-pill ts-pill-{side}">{label}</span>{html.escape(verdict.headline)}
@@ -1711,11 +1875,9 @@ def render_results(
     stress: Stress,
     theme: ChartTheme,
     asset: str,
-    *,
-    point: bool = False,
 ) -> None:
     probability = estimate.probability_beats_benchmark if estimate else float("nan")
-    render_answer(result, probability, asset, point=point)
+    render_answer(result, probability, asset)
 
     results = result.results
     start = result.config.initial_capital
@@ -2256,7 +2418,7 @@ def main() -> None:
     st.set_page_config(page_title="TradStrat", page_icon=":material/monitoring:", layout="wide")
     theme = theme_for(st.context.theme.type == "dark")
     inject_styles()
-    side_tip = st.sidebar.container()  # Above the settings, filled once it is known whether to show a tip.
+    side_top = st.sidebar.container()  # Above the settings, filled once it is known whether a test is open.
     restore_from_link()
     inputs = read_sidebar()
     started = has_started(inputs)
@@ -2272,9 +2434,14 @@ def main() -> None:
         render_footer()
         glide()
         return
-    if tips_on() and not state.get("changed_since_start"):
-        side_tip.html(
-            coach("Change the market or rule here. Everything updates.", ARROW_DOWN, "ts-coach-side")
+    if state.get("tour") is None:
+        side_top.button(
+            "Take the tour",
+            key="tour_replay",
+            on_click=tour_to,
+            args=(0,),
+            icon=":material/explore:",
+            type="tertiary",
         )
     write_link(inputs, st.session_state.get("_history_for_link"))
     ideas.button(
@@ -2331,15 +2498,10 @@ def main() -> None:
     visited: set[str] = state.setdefault("visited", {TABS[0]})
     visited.add(state.get("view") or TABS[0])
     journey_styles(visited)
-    if tips_on() and "Stress test" not in visited:
-        with st.container(key="coach_tabs", horizontal=True):
-            st.html(coach("Then see if it survives a stress test", ARROW_DOWN_LEFT, "ts-coach-tabs"))
-            st.button("Got it, hide tips", key="hide_tips", on_click=hide_tips, type="tertiary")
     results, stress_tab, trades, tune, compare, guide = st.tabs(TABS, key="view", on_change="rerun")
     if results.open:
         with results:
-            point = tips_on() and visited == {TABS[0]}
-            render_results(result, estimate, stress, theme, inputs.label, point=point)
+            render_results(result, estimate, stress, theme, inputs.label)
             render_next("Results")
     if stress_tab.open:
         with stress_tab:
@@ -2360,6 +2522,7 @@ def main() -> None:
     if guide.open:
         with guide:
             render_guide()
+    render_tour()
     glide()
     render_footer()
 

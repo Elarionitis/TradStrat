@@ -60,8 +60,8 @@ dates, and without its 5 best trades it grows 1.3% a year instead of 8.6%.
   when.
 - **Start from a question.** Six ready-made tests, such as whether a simple trend rule dodged Bitcoin's
   crashes, run on real prices in one click. Or pick a market, a rule and a span of history in three steps.
-- **Never wonder what to do next.** Hand-drawn hints point at the answer and the stress test, and every tab
-  ends with the next step, so the first visit walks through the whole test.
+- **Never wonder what to do next.** The first result opens a short guided tour that spotlights one thing at a
+  time, and every tab ends with the next step, so the first visit walks through the whole test.
 - **Start without a finance background.** The dashboard states the rule being tested in one sentence, explains
   every strategy in plain English, and defines each piece of jargon when you hover over it.
 - **See how fragile a result is.** Bootstrap intervals, the probabilistic and deflated Sharpe ratios, and the
