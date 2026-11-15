@@ -119,6 +119,9 @@ REPOSITORY: Final[str] = "https://github.com/Elarionitis/TradStrat"
 STRATEGY_KEYS: Final[list[str]] = [key for key in STRATEGIES if key != "buy_and_hold"]
 CUSTOM: Final[str] = "custom"
 STRATEGY_CHOICES: Final[list[str]] = [*STRATEGY_KEYS, CUSTOM]
+READY_MADE: Final[str] = "Ready-made"
+OWN_RULE: Final[str] = "Write my own"
+RULE_MODES: Final[list[str]] = [READY_MADE, OWN_RULE]
 DEFAULT_RULE: Final[tuple[str, str]] = EXAMPLES["Golden cross"]
 # A search runs one backtest per combination, so a rule with many numbers can ask for far too many.
 MAX_COMBINATIONS: Final[int] = 1_500
@@ -708,6 +711,18 @@ def literal(text: str) -> str:
     return re.sub(r"([\\`*_{}\[\]()<>#+\-.!|~$])", r"\\\1", text)
 
 
+def _switched_mode(key: str) -> None:
+    """Switch ``key`` between a written rule and the ready-made strategy chosen before it."""
+    state = st.session_state
+    mode_key = "rule_mode" if key == "strategy" else "compose_mode"
+    if state.get(mode_key) == OWN_RULE:
+        if state.get(key) != CUSTOM:
+            state[f"{key}_before"] = state.get(key)
+        state[key] = CUSTOM
+    else:
+        state[key] = state.get(f"{key}_before") or "trend_filter"
+
+
 def _use_example() -> None:
     choice = st.session_state.get("rule_example")
     if choice:
@@ -818,6 +833,8 @@ def write_link(inputs: Inputs, history: str | None) -> None:
 
 def read_sidebar() -> Inputs:
     today = pd.Timestamp.today().normalize()
+    if "strategy" in st.session_state:  # Keep the choice while its dropdown is hidden for a written rule.
+        st.session_state["strategy"] = st.session_state["strategy"]
     with st.sidebar:
         st.html('<div class="ts-side-step"><span>1</span>Market</div>')
         st.session_state.setdefault("source", "Yahoo")
@@ -873,13 +890,28 @@ def read_sidebar() -> Inputs:
             )
 
         st.html('<div class="ts-side-step"><span>2</span>Strategy</div>')
-        strategy_key = st.selectbox(
-            "Strategy",
-            STRATEGY_CHOICES,
-            format_func=lambda key: "Write your own rule" if key == CUSTOM else STRATEGIES[key].label,
-            key="strategy",
+        state = st.session_state
+        state["rule_mode"] = OWN_RULE if state.get("strategy") == CUSTOM else READY_MADE
+        st.segmented_control(
+            "Kind of rule",
+            RULE_MODES,
+            key="rule_mode",
+            required=True,
+            on_change=_switched_mode,
+            args=("strategy",),
+            width="stretch",
             label_visibility="collapsed",
         )
+        if state.get("strategy") == CUSTOM:
+            strategy_key = CUSTOM
+        else:
+            strategy_key = st.selectbox(
+                "Strategy",
+                STRATEGY_KEYS,
+                format_func=lambda key: STRATEGIES[key].label,
+                key="strategy",
+                label_visibility="collapsed",
+            )
         rule, rule_error = "", None
         if strategy_key == CUSTOM:
             strategy, rule, rule_error = read_rule()
@@ -1490,7 +1522,7 @@ def render_landing() -> None:
       got lucky.</p>
     <div class="ts-hero-actions ts-rise" style="--delay:.2s">
       <a class="ts-cta" href="#questions">Try a ready-made question ↓</a>
-      <a class="ts-cta-quiet" href="#compose">or test your own idea</a>
+      <a class="ts-cta-quiet" href="#compose">or write your own rule</a>
     </div>
     <div class="ts-hero-meta ts-rise" style="--delay:.26s">Seven classic strategies · Any Yahoo Finance
       ticker · Or write your own rule · Free and open source</div>
@@ -1592,7 +1624,13 @@ def compose() -> None:
     state["history"] = state.get("compose_history") or "10Y"
     state["custom_dates"] = False
     state["strategy"] = strategy
-    if strategy != CUSTOM:
+    if strategy == CUSTOM:
+        state["rule_buy"] = state.get("compose_buy", DEFAULT_RULE[0])
+        state["rule_sell"] = state.get("compose_sell", DEFAULT_RULE[1])
+        state["rule_example"] = next(
+            (name for name, rule in EXAMPLES.items() if rule == (state["rule_buy"], state["rule_sell"])), None
+        )
+    else:
         for spec in STRATEGIES[strategy].params:
             state[f"{strategy}.{spec.name}"] = spec.default
     start()
@@ -1602,12 +1640,13 @@ def render_compose() -> None:
     """Three choices and one button: the shortest way to test an idea of your own."""
     state = st.session_state
     state.setdefault("compose_market", "SPY")
-    state.setdefault("compose_strategy", "trend_filter")
+    state["compose_strategy"] = state.get("compose_strategy", "trend_filter")
     state.setdefault("compose_history", "10Y")
     with st.container(key="compose"):
         st.html(
             '<div class="ts ts-anchor" id="compose"><h3 class="ts-display">Or test your own idea</h3>'
-            '<div class="ts-muted">Three choices, one click. You can change any of them afterwards.</div>'
+            '<div class="ts-muted">Any market, a ready-made rule or one you write yourself, in plain words. '
+            "Three choices, one click.</div>"
             "</div>"
         )
         st.html('<div class="ts ts-compose-step"><span>1</span>Pick a market</div>')
@@ -1631,19 +1670,42 @@ def render_compose() -> None:
             )
         rule, history = st.columns([1.4, 1], gap="large")
         with rule:
-            st.html('<div class="ts ts-compose-step"><span>2</span>Pick a rule</div>')
-            choice = st.selectbox(
-                "Rule",
-                STRATEGY_CHOICES,
-                format_func=lambda key: "Write your own rule" if key == CUSTOM else STRATEGIES[key].label,
-                key="compose_strategy",
+            st.html('<div class="ts ts-compose-step"><span>2</span>Pick a rule, or write your own</div>')
+            state["compose_mode"] = OWN_RULE if state.get("compose_strategy") == CUSTOM else READY_MADE
+            st.segmented_control(
+                "Kind of rule",
+                RULE_MODES,
+                key="compose_mode",
+                required=True,
+                on_change=_switched_mode,
+                args=("compose_strategy",),
                 label_visibility="collapsed",
             )
-            summary = (
-                "Type a rule like rsi(2) < 10 and close > sma(200) in the sidebar, after you start."
-                if choice == CUSTOM
-                else guide_for(STRATEGIES[choice]).summary
-            )
+            if state.get("compose_strategy") == CUSTOM:
+                state.setdefault("compose_buy", DEFAULT_RULE[0])
+                st.text_input(
+                    "Buy when", key="compose_buy", max_chars=MAX_RULE_CHARS, placeholder="e.g. rsi(2) < 10"
+                )
+                state.setdefault("compose_sell", DEFAULT_RULE[1])
+                st.text_input(
+                    "Sell when",
+                    key="compose_sell",
+                    max_chars=MAX_RULE_CHARS,
+                    placeholder="Empty: sell once the buy rule stops being true",
+                )
+                summary = (
+                    "Plain words and simple maths on prices: close, sma(200), rsi(14), and, or, "
+                    "crosses above. More in the guide after you start."
+                )
+            else:
+                choice = st.selectbox(
+                    "Rule",
+                    STRATEGY_KEYS,
+                    format_func=lambda key: STRATEGIES[key].label,
+                    key="compose_strategy",
+                    label_visibility="collapsed",
+                )
+                summary = guide_for(STRATEGIES[choice]).summary
             st.html(f'<div class="ts ts-compose-hint">{html.escape(summary)}</div>')
         with history:
             st.html('<div class="ts ts-compose-step"><span>3</span>How far back</div>')

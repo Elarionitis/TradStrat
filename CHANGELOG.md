@@ -16,6 +16,9 @@ All notable changes to TradStrat. The project follows [semantic versioning](http
 - **A next step at the end of every tab.** Results leads to the stress test, then the trades, tuning and the
   comparison, so a visitor never reaches the bottom of a page and wonders what to do. Tabs are numbered in that
   order and tick off as you visit them, and the page glides to the next one.
+- **Writing your own rule is one click away.** The sidebar and the landing page both offer *Ready-made* or
+  *Write my own* side by side, instead of hiding your own rule at the bottom of the strategy list. A rule
+  written on the landing page runs straight away, and switching back restores the strategy you had.
 - **A notice when settings change.** Changing the market or rule in the sidebar updates every tab and says so.
 
 ### Changed

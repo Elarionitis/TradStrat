@@ -40,6 +40,16 @@ def app() -> AppTest:
     return test
 
 
+def write_own_rule(app: AppTest) -> AppTest:
+    """Switch the sidebar from a ready-made strategy to a rule of your own."""
+    return rule_mode(app, "Write my own")
+
+
+def rule_mode(app: AppTest, mode: str) -> AppTest:
+    next(group for group in app.sidebar.button_group if group.key == "rule_mode").set_value(mode).run()
+    return app
+
+
 def open_tab(app: AppTest, name: str) -> AppTest:
     """Only the open tab is built, so a test opens the one it reads."""
     app.session_state["view"] = name
@@ -351,9 +361,36 @@ def test_the_tour_opens_only_once_per_visit(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_a_sidebar_change_after_the_start_is_announced(app: AppTest) -> None:
-    app.sidebar.selectbox[0].set_value("custom").run()
+    write_own_rule(app)
 
     assert [toast.value for toast in app.toast if toast.value.startswith("Updated:")]
+
+
+def test_a_written_rule_is_one_click_away_and_switching_back_restores_the_strategy(app: AppTest) -> None:
+    app.sidebar.selectbox[0].set_value("rsi").run()
+    write_own_rule(app)
+
+    assert app.session_state["strategy"] == "custom"
+    assert [item.label for item in app.sidebar.text_input][:2] == ["Buy when", "Sell when"]
+    assert not app.exception
+
+    rule_mode(app, "Ready-made")
+    assert app.session_state["strategy"] == "rsi"
+
+
+def test_the_composer_runs_a_rule_you_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    sample = load_sample()
+    monkeypatch.setattr(data_module, "PROVIDERS", (("stub", lambda *_: sample),))
+    test = landing()
+
+    next(group for group in test.button_group if group.key == "compose_mode").set_value("Write my own").run()
+    next(item for item in test.text_input if item.key == "compose_buy").set_value("close > sma(100)").run()
+    next(item for item in test.button if item.key == "compose_run").click().run()
+
+    assert not test.exception
+    assert test.session_state["strategy"] == "custom"
+    assert test.session_state["rule_buy"] == "close > sma(100)"
+    assert [tab.label for tab in test.tabs] == TABS
 
 
 def test_the_wordmark_leads_back_to_the_landing_page(app: AppTest) -> None:
@@ -386,7 +423,7 @@ def test_the_benchmark_and_latest_signal_are_explained(app: AppTest) -> None:
 
 
 def test_a_custom_rule_runs_through_every_tab(app: AppTest) -> None:
-    app.sidebar.selectbox[0].set_value("custom").run()
+    write_own_rule(app)
 
     assert not app.exception
     assert not app.error
@@ -398,7 +435,7 @@ def test_a_custom_rule_runs_through_every_tab(app: AppTest) -> None:
 
 
 def test_an_example_fills_in_the_rule(app: AppTest) -> None:
-    app.sidebar.selectbox[0].set_value("custom").run()
+    write_own_rule(app)
     next(pills for pills in app.get("button_group") if "Dip in an uptrend" in str(pills.proto))
     app.session_state["rule_example"] = "Dip in an uptrend"
     app.session_state["rule_buy"] = "rsi(2) < 10 and close > sma(200)"
@@ -410,7 +447,7 @@ def test_an_example_fills_in_the_rule(app: AppTest) -> None:
 
 
 def test_an_unreadable_rule_shows_how_to_fix_it(app: AppTest) -> None:
-    app.sidebar.selectbox[0].set_value("custom").run()
+    write_own_rule(app)
     app.sidebar.text_input(key="rule_buy").set_value("close above sma(20)").run()
 
     assert not app.exception
@@ -419,7 +456,7 @@ def test_an_unreadable_rule_shows_how_to_fix_it(app: AppTest) -> None:
 
 
 def test_a_custom_rule_can_be_tuned(app: AppTest) -> None:
-    app.sidebar.selectbox[0].set_value("custom").run()
+    write_own_rule(app)
     open_tab(app, "Tune")
     app.tabs[3].slider[0].set_value(3)
     button(app, "Run search").click().run()
